@@ -134,13 +134,17 @@ export const ssoMicrosoftCallback = async (
 
     // Redirect to frontend with access token
     const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${accessToken}`;
-    logger.info(`Redirecting to: ${redirectUrl.substring(0, redirectUrl.indexOf('?token='))}`);
+    logger.info(
+      `Redirecting to: ${redirectUrl.substring(0, redirectUrl.indexOf("?token="))}`,
+    );
     res.redirect(redirectUrl);
   } catch (error) {
     logger.error("SSO callback error:", error);
     const errorMessage = error instanceof Error ? error.message : "unknown";
     logger.error(`Error details: ${errorMessage}`);
-    res.redirect(`${process.env.FRONTEND_URL}/login?error=sso_callback_error&details=${encodeURIComponent(errorMessage)}`);
+    res.redirect(
+      `${process.env.FRONTEND_URL}/login?error=sso_callback_error&details=${encodeURIComponent(errorMessage)}`,
+    );
   }
 };
 

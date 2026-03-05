@@ -45,8 +45,10 @@ export const configurePassport = (): void => {
       async (profile: IProfile, done: VerifyCallback): Promise<void> => {
         try {
           logger.info("Azure AD callback received");
-          logger.info(`Profile OID: ${profile.oid}, Email: ${profile._json?.email}`);
-          
+          logger.info(
+            `Profile OID: ${profile.oid}, Email: ${profile._json?.email}`,
+          );
+
           if (!profile.oid || !profile._json?.email) {
             logger.error("Invalid profile data - missing OID or email");
             return done(
@@ -112,7 +114,9 @@ export const configurePassport = (): void => {
             }
           }
 
-          logger.info(`User authenticated via SSO: ${email} with role: ${userRole}`);
+          logger.info(
+            `User authenticated via SSO: ${email} with role: ${userRole}`,
+          );
           return done(null, user);
         } catch (error) {
           logger.error("Error in Azure AD authentication:", error);

@@ -23,22 +23,47 @@ router.post(
 );
 
 // Microsoft SSO
-router.get(
-  "/sso/microsoft",
-  (req, res, next) => {
-    logger.info("Initiating Microsoft SSO authentication");
-    passport.authenticate("azuread-openidconnect", {
-      failureRedirect: `${env.frontendUrl}/login?error=sso_init_failed`,
-    })(req, res, next);
-  }
-);
+router.get("/sso/microsoft", (req, res, next) => {
+  logger.info("Initiating Microsoft SSO authentication");
+  passport.authenticate("azuread-openidconnect", {
+    failureRedirect: `${env.frontendUrl}/login?error=sso_init_failed`,
+  })(req, res, next);
+});
 
 router.get(
   "/sso/microsoft/callback",
   (req, res, next) => {
     logger.info("Microsoft SSO callback received");
-    passport.authenticate("azuread-openidconnect", {
-      failureRedirect: `${env.frontendUrl}/login?error=sso_auth_failed`,
+    logger.info("Session ID:", req.sessionID);
+    logger.info("Session data:", JSON.stringify(req.session, null, 2));
+    logger.info("Query params:", JSON.stringify(req.query, null, 2));
+    
+    // Use custom callback to capture authentication errors
+    passport.authenticate("azuread-openidconnect", (err: any, user: any, info: any) => {
+      if (err) {
+        logger.error("Passport authentication error:", err);
+        logger.error("Error details:", JSON.stringify(err, null, 2));
+        return res.redirect(`${env.frontendUrl}/login?error=sso_auth_failed&details=${encodeURIComponent(err.message || 'Unknown error')}`);
+      }
+      
+      if (!user) {
+        logger.error("Passport authentication failed - no user returned");
+        logger.error("Info:", info);
+        return res.redirect(`${env.frontendUrl}/login?error=sso_auth_failed&details=No user returned`);
+      }
+      
+      logger.info("Passport authentication successful, logging in user");
+      
+      // Manually log the user in
+      req.logIn(user, (loginErr: any) => {
+        if (loginErr) {
+          logger.error("Login error:", loginErr);
+          return res.redirect(`${env.frontendUrl}/login?error=sso_auth_failed&details=${encodeURIComponent(loginErr.message)}`);
+        }
+        
+        logger.info("User logged in successfully, proceeding to callback handler");
+        next();
+      });
     })(req, res, next);
   },
   auditLog("USER_SSO_LOGIN"),

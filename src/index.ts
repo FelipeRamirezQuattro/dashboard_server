@@ -1,5 +1,6 @@
 import express, { Application } from "express";
 import session from "express-session";
+import MongoStore from "connect-mongo";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
@@ -65,10 +66,18 @@ app.use(
     secret: env.sessionSecret,
     resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({
+      mongoUrl: env.mongodbUri,
+      touchAfter: 24 * 3600, // Lazy session update (24 hours)
+      crypto: {
+        secret: env.sessionSecret,
+      },
+    }),
     cookie: {
       secure: env.nodeEnv === "production",
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: env.nodeEnv === "production" ? "none" : "lax", // Allow cross-site in production for SSO
     },
   }),
 );
