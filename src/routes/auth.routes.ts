@@ -4,6 +4,7 @@ import * as authController from "../controllers/auth.controller";
 import { authenticate } from "../middleware/auth.middleware";
 import { auditLog } from "../middleware/audit.middleware";
 import { env } from "../config/env";
+import logger from "../utils/logger";
 
 const router = Router();
 
@@ -24,16 +25,22 @@ router.post(
 // Microsoft SSO
 router.get(
   "/sso/microsoft",
-  passport.authenticate("azuread-openidconnect", {
-    failureRedirect: `${env.frontendUrl}/login`,
-  }),
+  (req, res, next) => {
+    logger.info("Initiating Microsoft SSO authentication");
+    passport.authenticate("azuread-openidconnect", {
+      failureRedirect: `${env.frontendUrl}/login?error=sso_init_failed`,
+    })(req, res, next);
+  }
 );
 
 router.get(
   "/sso/microsoft/callback",
-  passport.authenticate("azuread-openidconnect", {
-    failureRedirect: `${env.frontendUrl}/login`,
-  }),
+  (req, res, next) => {
+    logger.info("Microsoft SSO callback received");
+    passport.authenticate("azuread-openidconnect", {
+      failureRedirect: `${env.frontendUrl}/login?error=sso_auth_failed`,
+    })(req, res, next);
+  },
   auditLog("USER_SSO_LOGIN"),
   authController.ssoMicrosoftCallback,
 );

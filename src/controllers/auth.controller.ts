@@ -84,12 +84,16 @@ export const ssoMicrosoftCallback = async (
   res: Response,
 ): Promise<void> => {
   try {
+    logger.info("SSO callback initiated");
     const user = req.user as IUser;
 
     if (!user) {
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=sso_failed`);
+      logger.error("SSO callback: No user found in request");
+      res.redirect(`${process.env.FRONTEND_URL}/login?error=sso_no_user`);
       return;
     }
+
+    logger.info(`SSO callback: User found - ${user.email}`);
 
     // Generate JWT tokens
     const tokenPayload = {
@@ -98,8 +102,10 @@ export const ssoMicrosoftCallback = async (
       role: user.role,
     };
 
+    logger.info(`Generating tokens for user: ${user.email}`);
     const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = generateRefreshToken(tokenPayload);
+    logger.info("Tokens generated successfully");
 
     // Store refresh token
     const expiresAt = new Date();
@@ -127,12 +133,14 @@ export const ssoMicrosoftCallback = async (
     });
 
     // Redirect to frontend with access token
-    res.redirect(
-      `${process.env.FRONTEND_URL}/auth/callback?token=${accessToken}`,
-    );
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${accessToken}`;
+    logger.info(`Redirecting to: ${redirectUrl.substring(0, redirectUrl.indexOf('?token='))}`);
+    res.redirect(redirectUrl);
   } catch (error) {
     logger.error("SSO callback error:", error);
-    res.redirect(`${process.env.FRONTEND_URL}/login?error=sso_failed`);
+    const errorMessage = error instanceof Error ? error.message : "unknown";
+    logger.error(`Error details: ${errorMessage}`);
+    res.redirect(`${process.env.FRONTEND_URL}/login?error=sso_callback_error&details=${encodeURIComponent(errorMessage)}`);
   }
 };
 
