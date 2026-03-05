@@ -31,12 +31,17 @@ export const configurePassport = (): void => {
     validateIssuer: true,
     passReqToCallback: false as const,
     scope: ["profile", "email", "openid"],
-    loggingLevel: (env.nodeEnv === "development" ? "info" : "error") as
-      | "info"
-      | "error",
+    loggingLevel: "info" as "info" | "error",
     nonceLifetime: 3600,
     nonceMaxAmount: 5,
-    useCookieInsteadOfSession: false,
+    useCookieInsteadOfSession: true, // Use cookies for state persistence
+    cookieEncryptionKeys: [
+      { 
+        key: env.sessionSecret.substring(0, 32), // Must be exactly 32 bytes
+        iv: env.sessionSecret.substring(0, 12)   // Must be exactly 12 bytes
+      },
+    ],
+    cookieSameSite: env.nodeEnv === "production",
   };
 
   passport.use(
