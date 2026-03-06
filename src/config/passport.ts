@@ -36,9 +36,9 @@ export const configurePassport = (): void => {
     nonceMaxAmount: 5,
     useCookieInsteadOfSession: true, // Use cookies for state persistence
     cookieEncryptionKeys: [
-      { 
+      {
         key: env.sessionSecret.substring(0, 32), // Must be exactly 32 bytes
-        iv: env.sessionSecret.substring(0, 12)   // Must be exactly 12 bytes
+        iv: env.sessionSecret.substring(0, 12), // Must be exactly 12 bytes
       },
     ],
     cookieSameSite: env.nodeEnv === "production",

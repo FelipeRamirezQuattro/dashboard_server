@@ -42,35 +42,49 @@ router.get(
     logger.info("Cookies:", JSON.stringify(req.cookies, null, 2));
     logger.info("Query params:", JSON.stringify(req.query, null, 2));
     logger.info("Headers:", JSON.stringify(req.headers, null, 2));
-    
+
     // Use custom callback to capture authentication errors
-    passport.authenticate("azuread-openidconnect", (err: any, user: any, info: any) => {
-      if (err) {
-        logger.error("Passport authentication error:", err);
-        logger.error("Error details:", JSON.stringify(err, null, 2));
-        return res.redirect(`${env.frontendUrl}/login?error=sso_auth_failed&details=${encodeURIComponent(err.message || 'Unknown error')}`);
-      }
-      
-      if (!user) {
-        logger.error("Passport authentication failed - no user returned");
-        logger.error("Info:", info);
-        logger.error("Request session after auth:", JSON.stringify(req.session, null, 2));
-        return res.redirect(`${env.frontendUrl}/login?error=sso_auth_failed&details=No user returned`);
-      }
-      
-      logger.info("Passport authentication successful, logging in user");
-      
-      // Manually log the user in
-      req.logIn(user, (loginErr: any) => {
-        if (loginErr) {
-          logger.error("Login error:", loginErr);
-          return res.redirect(`${env.frontendUrl}/login?error=sso_auth_failed&details=${encodeURIComponent(loginErr.message)}`);
+    passport.authenticate(
+      "azuread-openidconnect",
+      (err: any, user: any, info: any) => {
+        if (err) {
+          logger.error("Passport authentication error:", err);
+          logger.error("Error details:", JSON.stringify(err, null, 2));
+          return res.redirect(
+            `${env.frontendUrl}/login?error=sso_auth_failed&details=${encodeURIComponent(err.message || "Unknown error")}`,
+          );
         }
-        
-        logger.info("User logged in successfully, proceeding to callback handler");
-        next();
-      });
-    })(req, res, next);
+
+        if (!user) {
+          logger.error("Passport authentication failed - no user returned");
+          logger.error("Info:", info);
+          logger.error(
+            "Request session after auth:",
+            JSON.stringify(req.session, null, 2),
+          );
+          return res.redirect(
+            `${env.frontendUrl}/login?error=sso_auth_failed&details=No user returned`,
+          );
+        }
+
+        logger.info("Passport authentication successful, logging in user");
+
+        // Manually log the user in
+        req.logIn(user, (loginErr: any) => {
+          if (loginErr) {
+            logger.error("Login error:", loginErr);
+            return res.redirect(
+              `${env.frontendUrl}/login?error=sso_auth_failed&details=${encodeURIComponent(loginErr.message)}`,
+            );
+          }
+
+          logger.info(
+            "User logged in successfully, proceeding to callback handler",
+          );
+          next();
+        });
+      },
+    )(req, res, next);
   },
   auditLog("USER_SSO_LOGIN"),
   authController.ssoMicrosoftCallback,
