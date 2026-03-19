@@ -19,6 +19,10 @@ interface EnvConfig {
   encryptionKey: string;
   ssoAdminEmails: string[];
   ssoEditorEmails: string[];
+  // AI Chatbot Configuration (Optional)
+  openaiApiKey?: string;
+  openaiModel?: string;
+  enableAiFallback: boolean;
 }
 
 const requiredEnvVars = [
@@ -70,6 +74,11 @@ export const env: EnvConfig = {
         email.trim().toLowerCase(),
       )
     : [],
+  // AI Chatbot Configuration (Optional - enables AI fallback)
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+  enableAiFallback:
+    process.env.ENABLE_AI_FALLBACK?.toLowerCase() === "true" || false,
 };
 
 export default env;

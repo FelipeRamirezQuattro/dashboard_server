@@ -355,7 +355,54 @@ export const intents: Intent[] = [
       "oxyrock",
     ],
     response:
-      "I found Invoice I529284 for OXY Rock Operating! 📄\n\n🔗 [Download I529284 - ANTIETAM F 11HB.pdf](/documents/I529284%20-%20ANTIETAM%20F%2011HB.pdf)\n\n🏢 **Customer**: OXY Rock Operating\n🛢️ **Well**: Antietam F #11HB\n📅 **Invoice Date**: 2/25/2026\n📋 **Related SO**: SO29137\n💰 **Total**: $18,254.70\n💳 **Terms**: Net 30\n\n📦 **Main Items**:\n• 2-7/8\" x 24' Chem Tool Valve Assemblies (3 units)\n• 2-7/8\" x 5-1/2\" x 18' ESP Vortex Desander w/ 2.9 Helix\n• End User Delivery Charge\n\nClick the link above to download the complete invoice!",
+      'I found Invoice I529284 for OXY Rock Operating! 📄\n\n🔗 [Download I529284 - ANTIETAM F 11HB.pdf](/documents/I529284%20-%20ANTIETAM%20F%2011HB.pdf)\n\n🏢 **Customer**: OXY Rock Operating\n🛢️ **Well**: Antietam F #11HB\n📅 **Invoice Date**: 2/25/2026\n📋 **Related SO**: SO29137\n💰 **Total**: $18,254.70\n💳 **Terms**: Net 30\n\n📦 **Main Items**:\n• 2-7/8" x 24\' Chem Tool Valve Assemblies (3 units)\n• 2-7/8" x 5-1/2" x 18\' ESP Vortex Desander w/ 2.9 Helix\n• End User Delivery Charge\n\nClick the link above to download the complete invoice!',
+  },
+  // ==================== EXTERNAL APP QUERIES ====================
+  // Chemical Tracker - Wells
+  {
+    patterns: [
+      /show.*wells.*chemical tracker/i,
+      /list.*wells.*chemical tracker/i,
+      /how many wells.*chemical tracker/i,
+      /wells.*in chemical tracker/i,
+      /chemical tracker.*wells/i,
+      /all wells.*chemical/i,
+    ],
+    keywords: ["wells", "chemical", "tracker", "show", "list", "how", "many"],
+    response: "EXTERNAL_QUERY:chemical_tracker_wells",
+  },
+  // Chemical Tracker - Analytics/Summary
+  {
+    patterns: [
+      /chemical tracker.*summary/i,
+      /chemical tracker.*statistics/i,
+      /chemical tracker.*analytics/i,
+      /how many.*chemical tracker/i,
+      /stats.*chemical tracker/i,
+      /overview.*chemical tracker/i,
+    ],
+    keywords: [
+      "chemical",
+      "tracker",
+      "summary",
+      "statistics",
+      "analytics",
+      "stats",
+      "overview",
+    ],
+    response: "EXTERNAL_QUERY:chemical_tracker_analytics",
+  },
+  // Chemical Tracker - Clients
+  {
+    patterns: [
+      /show.*clients.*chemical tracker/i,
+      /list.*clients.*chemical tracker/i,
+      /chemical tracker.*clients/i,
+      /clients.*in chemical tracker/i,
+      /all clients.*chemical/i,
+    ],
+    keywords: ["clients", "chemical", "tracker", "show", "list", "all"],
+    response: "EXTERNAL_QUERY:chemical_tracker_clients",
   },
 ];
 
