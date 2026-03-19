@@ -36,6 +36,21 @@ interface ChatbotQueryResponse {
  */
 class AppRouterService {
   /**
+   * Normalize legacy app URLs for chatbot calls.
+   * Some launch URLs include SSO paths like /auth/microsoft, which must not be
+   * part of chatbot API base URLs.
+   */
+  private normalizeChatbotBaseUrl(rawUrl: string): string {
+    if (!rawUrl) return rawUrl;
+
+    const normalized = rawUrl
+      .replace(/\/auth\/microsoft\/?$/i, "")
+      .replace(/\/$/, "");
+
+    return normalized;
+  }
+
+  /**
    * Get the chatbot endpoint path for a specific app
    * Each app may have its own API prefix convention
    *
@@ -91,12 +106,31 @@ class AppRouterService {
         };
       }
 
+      // Require dedicated chatbot API URL — do not fall back to launch URL
+      if (!app.chatbotApiUrl) {
+        logger.warn(`${appName} has no chatbotApiUrl configured`);
+        return {
+          success: false,
+          reply: `The chatbot integration for ${appName} hasn't been implemented yet. Please contact your administrator to set it up.`,
+          timestamp: new Date().toISOString(),
+          error: {
+            code: "CHATBOT_NOT_CONFIGURED",
+            message: `Application ${appName} has no chatbotApiUrl configured`,
+          },
+        };
+      }
+
+      const chatbotBaseUrl = this.normalizeChatbotBaseUrl(app.chatbotApiUrl);
+
       // Create client for this app
-      const client = ExternalAppClientFactory.getClient(appName, app.url);
+      const client = ExternalAppClientFactory.getClient(
+        appName,
+        chatbotBaseUrl,
+      );
 
       // Send query to app's chatbot endpoint
       logger.info(
-        `Routing query to ${appName}: "${message.substring(0, 50)}..."`,
+        `Routing query to ${appName}: "${message.substring(0, 50)}..." (base: ${chatbotBaseUrl})`,
       );
 
       const request: ChatbotQueryRequest = {

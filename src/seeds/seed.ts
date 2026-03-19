@@ -49,7 +49,8 @@ const seedData = async (): Promise<void> => {
         name: "Chemical Tracker",
         description:
           "A web application for Odessa Separator Inc. to manage oil and gas wells, clients, and chemical analysis reports. Features include client & well management, chemical level tracking (Fe, Mn, THPS, Polytag, inhibitors), production data metrics, an interactive analytics dashboard with cross-module navigation, and Excel import/export.",
-        url: "https://api.osidesigner.com/api-chemtracker",
+        url: "https://chemical-tracker.osi-apps.com",
+        chatbotApiUrl: "https://api.osidesigner.com/api-chemtracker",
         iconUrl: "https://via.placeholder.com/64/10B981/FFFFFF?text=CHEM",
         category: "chemical",
         requiredRole: "viewer",

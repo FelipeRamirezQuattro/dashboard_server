@@ -65,6 +65,7 @@ export const createApp = async (
     name: string;
     description: string;
     url: string;
+    chatbotApiUrl?: string;
     ssoEndpoint?: string;
     iconUrl?: string;
     category: string;

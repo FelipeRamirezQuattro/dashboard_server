@@ -13,6 +13,7 @@ export interface IExternalApp extends Document {
   name: string;
   description: string;
   url: string;
+  chatbotApiUrl?: string;
   ssoEndpoint?: string;
   iconUrl?: string;
   category: AppCategory;
@@ -42,6 +43,10 @@ const externalAppSchema = new Schema<IExternalApp>(
     url: {
       type: String,
       required: true,
+      trim: true,
+    },
+    chatbotApiUrl: {
+      type: String,
       trim: true,
     },
     ssoEndpoint: {
