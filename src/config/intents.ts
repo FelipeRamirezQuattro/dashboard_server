@@ -84,9 +84,9 @@ export const intents: Intent[] = [
   },
   {
     patterns: [
-      /hello/i,
-      /hi/i,
-      /hey/i,
+      /\bhello\b/i,
+      /\bhi\b/i,
+      /\bhey\b/i,
       /good morning/i,
       /good afternoon/i,
       /good evening/i,
