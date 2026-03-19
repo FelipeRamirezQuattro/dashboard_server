@@ -3,6 +3,7 @@ import { intents, fallbackResponse } from "../config/intents";
 import logger from "../utils/logger";
 import { chemicalTrackerService } from "./chemicalTracker.service";
 import { AIChatProvider } from "./ai.provider";
+import { appRouterService } from "./appRouter.service";
 import { env } from "../config/env";
 
 /**
@@ -21,7 +22,14 @@ class HardcodedChatProvider implements ChatProvider {
         if (pattern instanceof RegExp && pattern.test(message)) {
           logger.info(`Intent matched: ${pattern}`);
 
-          // Check if this is an external app query
+          // Check if this should route to an external app
+          if (intent.response.startsWith("ROUTE:")) {
+            const appName = intent.response.replace("ROUTE:", "").trim();
+            logger.info(`Pattern matched - routing to ${appName}`);
+            return await this.routeToApp(appName, message);
+          }
+
+          // Check if this is an external app query (legacy)
           if (intent.response.startsWith("EXTERNAL_QUERY:")) {
             const queryType = intent.response.replace("EXTERNAL_QUERY:", "");
             return await this.handleExternalQuery(queryType);
@@ -47,7 +55,14 @@ class HardcodedChatProvider implements ChatProvider {
             `Intent matched by keywords: ${matchedKeywords.join(", ")}`,
           );
 
-          // Check if this is an external app query
+          // Check if this should route to an external app
+          if (intent.response.startsWith("ROUTE:")) {
+            const appName = intent.response.replace("ROUTE:", "").trim();
+            logger.info(`Keywords matched - routing to ${appName}`);
+            return await this.routeToApp(appName, message);
+          }
+
+          // Check if this is an external app query (legacy)
           if (intent.response.startsWith("EXTERNAL_QUERY:")) {
             const queryType = intent.response.replace("EXTERNAL_QUERY:", "");
             return await this.handleExternalQuery(queryType);
@@ -72,7 +87,42 @@ class HardcodedChatProvider implements ChatProvider {
   }
 
   /**
-   * Handle queries that require external app data
+   * Route query to external application's chatbot
+   */
+  private async routeToApp(
+    appName: string,
+    message: string,
+  ): Promise<ChatResponse> {
+    try {
+      logger.info(`Routing to ${appName} via pattern match`);
+
+      const response = await appRouterService.queryApp(appName, message);
+
+      if (response.success) {
+        return {
+          reply: response.reply,
+          timestamp: new Date(),
+          confidence: response.confidence || 0.9,
+        };
+      } else {
+        return {
+          reply: response.reply,
+          timestamp: new Date(),
+          confidence: 0,
+        };
+      }
+    } catch (error) {
+      logger.error(`Error routing to ${appName}:`, error);
+      return {
+        reply: `I encountered an error while connecting to ${appName}. Please try again later.`,
+        timestamp: new Date(),
+        confidence: 0,
+      };
+    }
+  }
+
+  /**
+   * Handle queries that require external app data (legacy - direct queries)
    */
   private async handleExternalQuery(queryType: string): Promise<ChatResponse> {
     try {

@@ -1,6 +1,21 @@
 import { Intent } from "../types/chatbot.types";
 
 export const intents: Intent[] = [
+  // Chemical Tracker queries - route directly without AI
+  {
+    patterns: [
+      /chem\s*-?\s*track/i,
+      /chemical\s*track/i,
+      /chem\s*tracker/i,
+      /chemical\s*tracker/i,
+      /(wells?|clients?|chemicals?|analytics).*\b(in|from|at|on)\b.*(chem|chemical)\s*-?\s*track/i,
+      /(chem|chemical)\s*-?\s*track.*(wells?|clients?|chemicals?|analytics)/i,
+      /\b(show|list|get|find|display)\b.*(wells?|clients?|chemicals?).*(chem|chemical)\s*-?\s*track/i,
+      /\b(show|list|get|find|display)\b.*(chem|chemical)\s*-?\s*track/i,
+    ],
+    keywords: ["chemical", "tracker", "chem", "track", "wells", "clients"],
+    response: "ROUTE:Chemical Tracker",
+  },
   {
     patterns: [
       /what does osi (separator )?inc\.? do/i,
