@@ -160,18 +160,33 @@ class AppRouterService {
         request,
       );
 
-      if (response.success && response.data) {
-        logger.info(`${appName} responded successfully`);
-        return response.data;
-      } else {
-        logger.error(`${appName} returned error:`, response.error);
-        return {
-          success: false,
-          reply: `${appName} encountered an error processing your request.`,
-          timestamp: new Date().toISOString(),
-          error: response.error,
-        };
+      // Support two response shapes from external apps:
+      // 1) Wrapped: { success, data: { success, reply, ... } }
+      // 2) Direct:  { success, reply, ... }
+      const wrappedResponse = response as {
+        success?: boolean;
+        data?: ChatbotQueryResponse;
+        error?: { code: string; message: string };
+      };
+      const directResponse = response as unknown as ChatbotQueryResponse;
+
+      if (wrappedResponse.success && wrappedResponse.data) {
+        logger.info(`${appName} responded successfully (wrapped format)`);
+        return wrappedResponse.data;
       }
+
+      if (directResponse.success && directResponse.reply) {
+        logger.info(`${appName} responded successfully (direct format)`);
+        return directResponse;
+      }
+
+      logger.error(`${appName} returned error:`, wrappedResponse.error);
+      return {
+        success: false,
+        reply: `${appName} encountered an error processing your request.`,
+        timestamp: new Date().toISOString(),
+        error: wrappedResponse.error,
+      };
     } catch (error: any) {
       logger.error(`Error querying ${appName}:`, error);
       return {
