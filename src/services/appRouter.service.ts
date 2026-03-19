@@ -38,18 +38,21 @@ class AppRouterService {
   /**
    * Get the chatbot endpoint path for a specific app
    * Each app may have its own API prefix convention
+   *
+   * NOTE: The base URL already includes the API prefix (e.g., /api-chemtracker)
+   * So we only need the relative path from there
    */
   private getChatbotEndpoint(appName: string): string {
-    // Map app names to their specific chatbot endpoints
+    // Map app names to their chatbot endpoints (relative to base URL)
     const endpointMap: Record<string, string> = {
-      "Chemical Tracker": "/api-chemtracker/chatbot/query",
-      "OSI Pump Pro": "/api-pumppro/chatbot/query",
-      Designer: "/api-designer/chatbot/query",
-      "Gas Separator": "/api-gassep/chatbot/query",
+      "Chemical Tracker": "/chatbot/query",
+      "OSI Pump Pro": "/chatbot/query",
+      Designer: "/chatbot/query",
+      "Gas Separator": "/chatbot/query",
     };
 
     // Return app-specific endpoint or default to generic endpoint
-    return endpointMap[appName] || "/api/chatbot/query";
+    return endpointMap[appName] || "/chatbot/query";
   }
 
   /**
