@@ -23,6 +23,8 @@ interface EnvConfig {
   openaiApiKey?: string;
   openaiModel?: string;
   enableAiFallback: boolean;
+  // External app chatbot service-to-service API keys (Optional)
+  chemtrackerChatbotApiKey?: string;
 }
 
 const requiredEnvVars = [
@@ -79,6 +81,8 @@ export const env: EnvConfig = {
   openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
   enableAiFallback:
     process.env.ENABLE_AI_FALLBACK?.toLowerCase() === "true" || false,
+  // External app chatbot service-to-service API keys (Optional)
+  chemtrackerChatbotApiKey: process.env.CHEMTRACKER_CHATBOT_API_KEY,
 };
 
 export default env;

@@ -1,6 +1,7 @@
 import { ExternalAppClientFactory } from "./externalApp.client";
 import ExternalApp from "../models/App.model";
 import logger from "../utils/logger";
+import { env } from "../config/env";
 
 /**
  * Standard chatbot query request to external apps
@@ -35,6 +36,17 @@ interface ChatbotQueryResponse {
  * Routes user queries to the appropriate external application's chatbot
  */
 class AppRouterService {
+  /**
+   * Get service-to-service API key for a specific app
+   */
+  private getAppApiKey(appName: string): string | undefined {
+    const apiKeyMap: Record<string, string | undefined> = {
+      "Chemical Tracker": env.chemtrackerChatbotApiKey,
+    };
+
+    return apiKeyMap[appName];
+  }
+
   /**
    * Normalize legacy app URLs for chatbot calls.
    * Some launch URLs include SSO paths like /auth/microsoft, which must not be
@@ -121,11 +133,13 @@ class AppRouterService {
       }
 
       const chatbotBaseUrl = this.normalizeChatbotBaseUrl(app.chatbotApiUrl);
+      const appApiKey = this.getAppApiKey(appName);
 
       // Create client for this app
       const client = ExternalAppClientFactory.getClient(
         appName,
         chatbotBaseUrl,
+        appApiKey,
       );
 
       // Send query to app's chatbot endpoint

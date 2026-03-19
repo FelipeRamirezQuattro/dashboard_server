@@ -171,14 +171,17 @@ export class ExternalAppClientFactory {
   /**
    * Get or create a client for a specific external app
    */
-  static getClient(appName: string, baseURL: string): ExternalAppClient {
-    const key = `${appName}-${baseURL}`;
+  static getClient(
+    appName: string,
+    baseURL: string,
+    apiKey?: string,
+  ): ExternalAppClient {
+    const key = `${appName}-${baseURL}-${apiKey || "no-key"}`;
     if (!this.clients.has(key)) {
       const config: ExternalAppConfig = {
         baseURL,
         timeout: 15000, // 15 seconds
-        // Add API key from env if needed
-        // apiKey: env[`${appName}_API_KEY`]
+        apiKey,
       };
       this.clients.set(key, new ExternalAppClient(config, appName));
     }
