@@ -185,20 +185,6 @@ export const intents: Intent[] = [
   },
   {
     patterns: [
-      /chemical tracker/i,
-      /ovintiv.*tracker/i,
-      /show.*chemical tracker/i,
-      /find.*chemical tracker/i,
-      /find.*last.*chemical tracker.*ovintiv/i,
-      /last.*chemical tracker.*ovintiv/i,
-      /chemical tracker.*ovintiv.*hz/i,
-    ],
-    keywords: ["chemical", "tracker", "ovintiv", "hz", "find", "last"],
-    response:
-      "I found the Chemical Tracker for Ovintiv HZ! 🧪\n\n🔗 [Download Chemical Tracker-Ovintiv HZ.pdf](/documents/Chemical%20Tracker-Ovintiv%20HZ.pdf)\n\n🏢 **Customer**: Ovintiv\n🛢️ **Field**: HZ\n📊 **Type**: Chemical Tracking Report\n\nClick the link above to download the chemical tracker!",
-  },
-  {
-    patterns: [
       /who we are/i,
       /company.*overview/i,
       /osi.*presentation/i,
