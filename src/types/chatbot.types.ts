@@ -9,6 +9,12 @@ export interface ChatRequest {
   message: string;
   userId?: string;
   sessionId?: string;
+  context?: {
+    history?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+  };
 }
 
 export interface ChatResponse {
@@ -24,5 +30,5 @@ export interface Intent {
 }
 
 export interface ChatProvider {
-  getResponse(message: string): Promise<ChatResponse>;
+  getResponse(message: string, request?: ChatRequest): Promise<ChatResponse>;
 }

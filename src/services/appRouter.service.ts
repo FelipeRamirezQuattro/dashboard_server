@@ -89,6 +89,7 @@ class AppRouterService {
     appName: string,
     message: string,
     userId?: string,
+    context?: Record<string, any>,
   ): Promise<ChatbotQueryResponse> {
     try {
       // Get app from database to get its URL
@@ -150,6 +151,7 @@ class AppRouterService {
       const request: ChatbotQueryRequest = {
         message,
         userId,
+        context,
       };
 
       // Get the chatbot endpoint for this specific app

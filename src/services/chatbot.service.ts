@@ -1,4 +1,8 @@
-import { ChatProvider, ChatResponse } from "../types/chatbot.types";
+import {
+  ChatProvider,
+  ChatRequest,
+  ChatResponse,
+} from "../types/chatbot.types";
 import { intents, fallbackResponse } from "../config/intents";
 import logger from "../utils/logger";
 import { chemicalTrackerService } from "./chemicalTracker.service";
@@ -12,7 +16,10 @@ import { env } from "../config/env";
  * This will be replaced with AIChatProvider in the future.
  */
 class HardcodedChatProvider implements ChatProvider {
-  async getResponse(message: string): Promise<ChatResponse> {
+  async getResponse(
+    message: string,
+    request?: ChatRequest,
+  ): Promise<ChatResponse> {
     const normalizedMessage = message.trim().toLowerCase();
 
     // Try to match against patterns
@@ -26,7 +33,7 @@ class HardcodedChatProvider implements ChatProvider {
           if (intent.response.startsWith("ROUTE:")) {
             const appName = intent.response.replace("ROUTE:", "").trim();
             logger.info(`Pattern matched - routing to ${appName}`);
-            return await this.routeToApp(appName, message);
+            return await this.routeToApp(appName, message, request);
           }
 
           // Check if this is an external app query (legacy)
@@ -59,7 +66,7 @@ class HardcodedChatProvider implements ChatProvider {
           if (intent.response.startsWith("ROUTE:")) {
             const appName = intent.response.replace("ROUTE:", "").trim();
             logger.info(`Keywords matched - routing to ${appName}`);
-            return await this.routeToApp(appName, message);
+            return await this.routeToApp(appName, message, request);
           }
 
           // Check if this is an external app query (legacy)
@@ -92,11 +99,17 @@ class HardcodedChatProvider implements ChatProvider {
   private async routeToApp(
     appName: string,
     message: string,
+    request?: ChatRequest,
   ): Promise<ChatResponse> {
     try {
       logger.info(`Routing to ${appName} via pattern match`);
 
-      const response = await appRouterService.queryApp(appName, message);
+      const response = await appRouterService.queryApp(
+        appName,
+        message,
+        request?.userId,
+        request?.context,
+      );
 
       if (response.success) {
         return {
@@ -259,9 +272,15 @@ class HybridChatProvider implements ChatProvider {
     }
   }
 
-  async getResponse(message: string): Promise<ChatResponse> {
+  async getResponse(
+    message: string,
+    request?: ChatRequest,
+  ): Promise<ChatResponse> {
     // Step 1: Try pattern matching first (fast, no cost)
-    const patternResponse = await this.hardcodedProvider.getResponse(message);
+    const patternResponse = await this.hardcodedProvider.getResponse(
+      message,
+      request,
+    );
 
     // If pattern matching found a match (confidence > 0), use it
     if (patternResponse.confidence && patternResponse.confidence > 0) {
@@ -274,7 +293,7 @@ class HybridChatProvider implements ChatProvider {
     // Step 2: If no pattern match, try AI fallback (if enabled)
     if (this.aiEnabled && this.aiProvider) {
       logger.info("No pattern match, using AI fallback");
-      return await this.aiProvider.getResponse(message);
+      return await this.aiProvider.getResponse(message, request);
     }
 
     // Step 3: No pattern match and AI disabled, return fallback
@@ -296,8 +315,9 @@ class ChatbotService {
     this.provider = provider || new HybridChatProvider();
   }
 
-  async processMessage(message: string): Promise<ChatResponse> {
+  async processMessage(request: ChatRequest): Promise<ChatResponse> {
     try {
+      const message = request.message;
       if (!message || message.trim().length === 0) {
         return {
           reply: "Please ask me a question about OSI.",
@@ -306,7 +326,7 @@ class ChatbotService {
         };
       }
 
-      const response = await this.provider.getResponse(message);
+      const response = await this.provider.getResponse(message, request);
       return response;
     } catch (error) {
       logger.error("Error processing chatbot message:", error);

@@ -1,5 +1,9 @@
 import OpenAI from "openai";
-import { ChatProvider, ChatResponse } from "../types/chatbot.types";
+import {
+  ChatProvider,
+  ChatRequest,
+  ChatResponse,
+} from "../types/chatbot.types";
 import { env } from "../config/env";
 import logger from "../utils/logger";
 import { appRouterService } from "./appRouter.service";
@@ -114,7 +118,10 @@ export class AIChatProvider implements ChatProvider {
     }
   }
 
-  async getResponse(message: string): Promise<ChatResponse> {
+  async getResponse(
+    message: string,
+    request?: ChatRequest,
+  ): Promise<ChatResponse> {
     if (!this.isEnabled || !this.client) {
       return {
         reply:
@@ -134,6 +141,10 @@ export class AIChatProvider implements ChatProvider {
             role: "system",
             content: SYSTEM_PROMPT,
           },
+          ...((request?.context?.history || []).slice(-10).map((turn) => ({
+            role: turn.role,
+            content: turn.content,
+          })) as Array<{ role: "user" | "assistant"; content: string }>),
           {
             role: "user",
             content: message,
@@ -148,7 +159,7 @@ export class AIChatProvider implements ChatProvider {
       // Check if AI wants to route to an external app
       if (aiResponse.startsWith("ROUTE:")) {
         const appName = aiResponse.replace("ROUTE:", "").trim();
-        return await this.routeToApp(appName, message);
+        return await this.routeToApp(appName, message, request);
       }
 
       // Direct answer from AI
@@ -193,11 +204,17 @@ export class AIChatProvider implements ChatProvider {
   private async routeToApp(
     appName: string,
     message: string,
+    request?: ChatRequest,
   ): Promise<ChatResponse> {
     try {
       logger.info(`AI routing to ${appName}`);
 
-      const response = await appRouterService.queryApp(appName, message);
+      const response = await appRouterService.queryApp(
+        appName,
+        message,
+        request?.userId,
+        request?.context,
+      );
 
       if (response.success) {
         return {
