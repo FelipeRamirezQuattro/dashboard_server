@@ -25,6 +25,9 @@ interface EnvConfig {
   enableAiFallback: boolean;
   // External app chatbot service-to-service API keys (Optional)
   chemtrackerChatbotApiKey?: string;
+  // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
+  enableN8nChatbot: boolean;
+  n8nWebhookUrl: string;
 }
 
 const requiredEnvVars = [
@@ -83,6 +86,12 @@ export const env: EnvConfig = {
     process.env.ENABLE_AI_FALLBACK?.toLowerCase() === "true" || false,
   // External app chatbot service-to-service API keys (Optional)
   chemtrackerChatbotApiKey: process.env.CHEMTRACKER_CHATBOT_API_KEY,
+  // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
+  enableN8nChatbot:
+    process.env.ENABLE_N8N_CHATBOT?.toLowerCase() === "true" || false,
+  n8nWebhookUrl:
+    process.env.N8N_WEBHOOK_URL ||
+    "https://felipe-osi.app.n8n.cloud/webhook/osi-agent",
 };
 
 export default env;
