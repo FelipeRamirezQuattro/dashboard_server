@@ -21,6 +21,7 @@ import businessUnitRoutes from "./routes/businessUnit.routes";
 import departmentRoutes from "./routes/department.routes";
 import permissionsRoutes from "./routes/permissions.routes";
 import chatbotRoutes from "./routes/chatbot.routes";
+import notificationRoutes from "./routes/notification.routes";
 
 const app: Application = express();
 
@@ -106,6 +107,7 @@ app.use("/api-dashboard/business-units", businessUnitRoutes);
 app.use("/api-dashboard/departments", departmentRoutes);
 app.use("/api-dashboard/permissions", permissionsRoutes);
 app.use("/api-dashboard/chatbot", chatbotRoutes);
+app.use("/api-dashboard/notifications", notificationRoutes);
 
 // 404 handler
 app.use(notFound);
