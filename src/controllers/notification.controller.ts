@@ -4,7 +4,10 @@ import * as notificationSSE from "../services/notificationSSE.service";
 import { generateSseToken, verifySseToken } from "../utils/sseToken.utils";
 import logger from "../utils/logger";
 
-export const getNotifications = async (req: Request, res: Response): Promise<void> => {
+export const getNotifications = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({ error: "Authentication required" });
@@ -20,13 +23,18 @@ export const getNotifications = async (req: Request, res: Response): Promise<voi
   }
 };
 
-export const getUnreadCount = async (req: Request, res: Response): Promise<void> => {
+export const getUnreadCount = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
-    const count = await notificationService.getUnreadCount(req.user._id.toString());
+    const count = await notificationService.getUnreadCount(
+      req.user._id.toString(),
+    );
     res.json({ count });
   } catch (error) {
     logger.error("Get unread count error:", error);
@@ -34,7 +42,10 @@ export const getUnreadCount = async (req: Request, res: Response): Promise<void>
   }
 };
 
-export const requestSseToken = async (req: Request, res: Response): Promise<void> => {
+export const requestSseToken = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({ error: "Authentication required" });
@@ -65,7 +76,10 @@ export const sseStream = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const getAllNotificationsAdmin = async (_req: Request, res: Response): Promise<void> => {
+export const getAllNotificationsAdmin = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const notifications = await notificationService.getAllNotifications();
     res.json({ notifications });
@@ -75,7 +89,10 @@ export const getAllNotificationsAdmin = async (_req: Request, res: Response): Pr
   }
 };
 
-export const createNotification = async (req: Request, res: Response): Promise<void> => {
+export const createNotification = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({ error: "Authentication required" });
@@ -92,10 +109,16 @@ export const createNotification = async (req: Request, res: Response): Promise<v
   }
 };
 
-export const updateNotification = async (req: Request, res: Response): Promise<void> => {
+export const updateNotification = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { id } = req.params;
-    const notification = await notificationService.updateNotification(id, req.body);
+    const notification = await notificationService.updateNotification(
+      id,
+      req.body,
+    );
     if (!notification) {
       res.status(404).json({ error: "Notification not found" });
       return;
@@ -107,7 +130,10 @@ export const updateNotification = async (req: Request, res: Response): Promise<v
   }
 };
 
-export const deleteNotification = async (req: Request, res: Response): Promise<void> => {
+export const deleteNotification = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const { id } = req.params;
     const notification = await notificationService.deactivateNotification(id);
@@ -137,7 +163,10 @@ export const markRead = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const markAllRead = async (req: Request, res: Response): Promise<void> => {
+export const markAllRead = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({ error: "Authentication required" });
@@ -151,6 +180,9 @@ export const markAllRead = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-export const getConnectedClients = async (_req: Request, res: Response): Promise<void> => {
+export const getConnectedClients = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
   res.json({ connectedClients: notificationSSE.getConnectedClientCount() });
 };

@@ -9,11 +9,9 @@ interface SseTokenPayload {
 }
 
 export const generateSseToken = (userId: string): string => {
-  return jwt.sign(
-    { userId, type: "sse" },
-    env.jwtSecret,
-    { expiresIn: "15m" } as SignOptions,
-  );
+  return jwt.sign({ userId, type: "sse" }, env.jwtSecret, {
+    expiresIn: "15m",
+  } as SignOptions);
 };
 
 export const verifySseToken = (token: string): string => {

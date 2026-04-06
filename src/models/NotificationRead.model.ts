@@ -28,7 +28,10 @@ const notificationReadSchema = new Schema<INotificationRead>(
   },
 );
 
-notificationReadSchema.index({ userId: 1, notificationId: 1 }, { unique: true });
+notificationReadSchema.index(
+  { userId: 1, notificationId: 1 },
+  { unique: true },
+);
 notificationReadSchema.index({ userId: 1 });
 
 const NotificationRead = mongoose.model<INotificationRead>(

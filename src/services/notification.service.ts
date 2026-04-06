@@ -32,7 +32,10 @@ export const createNotification = async (
   const notification = await Notification.create({ ...data, createdBy });
 
   // Broadcast lightweight ping — clients re-fetch their scoped list
-  notificationSSE.broadcast({ type: "new_notification", notificationId: notification._id });
+  notificationSSE.broadcast({
+    type: "new_notification",
+    notificationId: notification._id,
+  });
 
   return notification;
 };
@@ -53,10 +56,16 @@ export const getNotificationsForUser = async (
 
   const scopeConditions: object[] = [{ targetScope: "all" }];
   if (buIds.length > 0) {
-    scopeConditions.push({ targetScope: "businessUnit", targetId: { $in: buIds } });
+    scopeConditions.push({
+      targetScope: "businessUnit",
+      targetId: { $in: buIds },
+    });
   }
   if (deptIds.length > 0) {
-    scopeConditions.push({ targetScope: "department", targetId: { $in: deptIds } });
+    scopeConditions.push({
+      targetScope: "department",
+      targetId: { $in: deptIds },
+    });
   }
 
   const notifications = await Notification.find({
@@ -119,7 +128,10 @@ export const markAllAsRead = async (userId: string): Promise<void> => {
   await NotificationRead.bulkWrite(
     unreadIds.map((id) => ({
       updateOne: {
-        filter: { userId: new Types.ObjectId(userId), notificationId: new Types.ObjectId(id) },
+        filter: {
+          userId: new Types.ObjectId(userId),
+          notificationId: new Types.ObjectId(id),
+        },
         update: {
           $setOnInsert: {
             userId: new Types.ObjectId(userId),
@@ -145,7 +157,9 @@ export const updateNotification = async (
   id: string,
   data: Partial<CreateNotificationDto>,
 ): Promise<Record<string, any> | null> => {
-  return Notification.findByIdAndUpdate(id, data, { new: true }).lean() as unknown as Record<string, any> | null;
+  return Notification.findByIdAndUpdate(id, data, {
+    new: true,
+  }).lean() as unknown as Record<string, any> | null;
 };
 
 export const deactivateNotification = async (

@@ -17,7 +17,9 @@ export const registerClient = (userId: string, res: Response): void => {
   clients.get(userId)!.add(res);
 
   // Send initial heartbeat so the client knows the connection is live
-  res.write(`event: connected\ndata: ${JSON.stringify({ connected: true })}\n\n`);
+  res.write(
+    `event: connected\ndata: ${JSON.stringify({ connected: true })}\n\n`,
+  );
 
   // Keep-alive ping every 25 seconds to prevent proxy timeouts
   const keepAlive = setInterval(() => {
@@ -48,7 +50,10 @@ export const broadcast = (payload: Record<string, unknown>): void => {
   });
 };
 
-export const sendToUser = (userId: string, payload: Record<string, unknown>): void => {
+export const sendToUser = (
+  userId: string,
+  payload: Record<string, unknown>,
+): void => {
   const userClients = clients.get(userId);
   if (!userClients) return;
   const data = JSON.stringify(payload);

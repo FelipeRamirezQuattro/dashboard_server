@@ -19,10 +19,18 @@ router.patch("/:id/read", notificationController.markRead);
 router.patch("/read-all", notificationController.markAllRead);
 
 // Admin-only endpoints
-router.get("/admin/all", requireAdmin, notificationController.getAllNotificationsAdmin);
+router.get(
+  "/admin/all",
+  requireAdmin,
+  notificationController.getAllNotificationsAdmin,
+);
 router.post("/", requireAdmin, notificationController.createNotification);
 router.put("/:id", requireAdmin, notificationController.updateNotification);
 router.delete("/:id", requireAdmin, notificationController.deleteNotification);
-router.get("/admin/connected-clients", requireAdmin, notificationController.getConnectedClients);
+router.get(
+  "/admin/connected-clients",
+  requireAdmin,
+  notificationController.getConnectedClients,
+);
 
 export default router;
