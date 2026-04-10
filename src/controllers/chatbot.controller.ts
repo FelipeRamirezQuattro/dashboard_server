@@ -3,10 +3,6 @@ import { chatbotService } from "../services/chatbot.service";
 import { n8nWebhookProvider } from "../services/n8nWebhook.service";
 import { env } from "../config/env";
 import logger from "../utils/logger";
-import {
-  appendConversationTurns,
-  getConversationHistory,
-} from "../services/conversation.service";
 
 export const sendMessage = async (req: Request, res: Response) => {
   try {
@@ -16,22 +12,14 @@ export const sendMessage = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // Optional: Log user interaction for analytics
     const userId = req.user?.id || "anonymous";
-    const effectiveSessionId = sessionId || `default-${userId || "anonymous"}`;
+    const effectiveSessionId = sessionId || `default-${userId}`;
 
-    // Pull persisted context from MongoDB so conversation survives reloads.
-    const persistedHistory = req.user?.id
-      ? await getConversationHistory(req.user.id, effectiveSessionId)
-      : [];
-
-    const mergedHistory = [
-      ...persistedHistory,
-      ...((context?.history || []) as Array<{
-        role: "user" | "assistant";
-        content: string;
-      }>),
-    ].slice(-12);
+    // Use only the context sent by the client (session-only, no DB persistence).
+    const history = ((context?.history || []) as Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>).slice(-12);
 
     logger.info(
       `Chatbot message from user ${userId}: ${message.substring(0, 50)}...`,
@@ -47,22 +35,15 @@ export const sendMessage = async (req: Request, res: Response) => {
           userId,
           userEmail,
           sessionId: effectiveSessionId,
-          context: { history: mergedHistory },
+          context: { history },
         })
       : await chatbotService.processMessage({
           message,
           userId,
           userEmail,
           sessionId: effectiveSessionId,
-          context: { history: mergedHistory },
+          context: { history },
         });
-
-    if (req.user?.id) {
-      await appendConversationTurns(req.user.id, effectiveSessionId, [
-        { role: "user", content: message },
-        { role: "assistant", content: response.reply },
-      ]);
-    }
 
     return res.status(200).json({
       reply: response.reply,
@@ -73,24 +54,5 @@ export const sendMessage = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error("Error in chatbot controller:", error);
     return res.status(500).json({ error: "Failed to process message" });
-  }
-};
-
-export const getHistory = async (req: Request, res: Response) => {
-  try {
-    if (!req.user?.id) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-
-    const sessionId = String(req.query.sessionId || "").trim();
-    if (!sessionId) {
-      return res.status(400).json({ error: "sessionId is required" });
-    }
-
-    const history = await getConversationHistory(req.user.id, sessionId, 50);
-    return res.status(200).json({ sessionId, history });
-  } catch (error) {
-    logger.error("Error fetching chatbot history:", error);
-    return res.status(500).json({ error: "Failed to fetch chatbot history" });
   }
 };
