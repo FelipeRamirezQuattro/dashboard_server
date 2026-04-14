@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { chatbotService } from "../services/chatbot.service";
 import { n8nWebhookProvider } from "../services/n8nWebhook.service";
+import { documentLookupService } from "../services/documentLookup.service";
 import { env } from "../config/env";
 import logger from "../utils/logger";
 
@@ -27,6 +28,19 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     const userEmail = req.user?.email;
 
+    // ── Step 1: Local document lookup (instant, zero-cost) ──────────
+    const docResponse = documentLookupService.lookup(message);
+    if (docResponse) {
+      logger.info(`Document match found for: "${message.substring(0, 50)}..."`);
+      return res.status(200).json({
+        reply: docResponse.reply,
+        timestamp: docResponse.timestamp,
+        confidence: docResponse.confidence,
+        sessionId: effectiveSessionId,
+      });
+    }
+
+    // ── Step 2: n8n webhook or legacy hybrid provider ───────────────
     // Switch between n8n webhook approach and legacy hybrid approach via env flag.
     // Set ENABLE_N8N_CHATBOT=true in .env to use the n8n workflow.
     const response = env.enableN8nChatbot
