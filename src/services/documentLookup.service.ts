@@ -173,7 +173,10 @@ class DocumentLookupService {
       .filter((s) => s.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    if (scored.length && scored[0].score >= 1) {
+    // Require at least 2 keyword matches to avoid false positives.
+    // e.g. "proposal for GAMORA" should NOT match Tall Grass just because
+    // the word "proposal" appears in the filename — it should go to n8n.
+    if (scored.length && scored[0].score >= 2) {
       const topScore = scored[0].score;
       const topHits = scored
         .filter((s) => s.score === topScore)
