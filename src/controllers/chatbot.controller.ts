@@ -17,10 +17,12 @@ export const sendMessage = async (req: Request, res: Response) => {
     const effectiveSessionId = sessionId || `default-${userId}`;
 
     // Use only the context sent by the client (session-only, no DB persistence).
-    const history = ((context?.history || []) as Array<{
-      role: "user" | "assistant";
-      content: string;
-    }>).slice(-12);
+    const history = (
+      (context?.history || []) as Array<{
+        role: "user" | "assistant";
+        content: string;
+      }>
+    ).slice(-12);
 
     logger.info(
       `Chatbot message from user ${userId}: ${message.substring(0, 50)}...`,

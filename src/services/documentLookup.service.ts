@@ -82,8 +82,7 @@ const DOCUMENT_REGISTRY: DocumentMeta[] = [
   {
     filename: "WHO WE ARE 2025 ENG.pdf",
     label: "WHO WE ARE 2025 — Company Overview",
-    details:
-      "🏢 **Document**: Company Overview 2025\n🌐 **Language**: English",
+    details: "🏢 **Document**: Company Overview 2025\n🌐 **Language**: English",
   },
 ];
 
@@ -120,8 +119,7 @@ class DocumentLookupService {
       msg.match(/\bsales\s+order\s+(\d{4,6})\b/);
 
     const invMatch =
-      msg.match(/\bi(\d{5,7})\b/) ||
-      msg.match(/\binvoice\s*(\d{5,7})\b/);
+      msg.match(/\bi(\d{5,7})\b/) || msg.match(/\binvoice\s*(\d{5,7})\b/);
 
     const swpscMatch = msg.match(/\bswpsc\s*(\d+)\b/);
 
@@ -152,10 +150,34 @@ class DocumentLookupService {
 
     // ── 3. Keyword-based fuzzy match ─────────────────────────────────
     const stopWords = new Set([
-      "the", "for", "and", "can", "you", "pull", "show", "find",
-      "get", "give", "look", "open", "download", "display", "fetch",
-      "from", "with", "that", "this", "have", "what", "where",
-      "please", "latest", "last", "first", "most", "recent",
+      "the",
+      "for",
+      "and",
+      "can",
+      "you",
+      "pull",
+      "show",
+      "find",
+      "get",
+      "give",
+      "look",
+      "open",
+      "download",
+      "display",
+      "fetch",
+      "from",
+      "with",
+      "that",
+      "this",
+      "have",
+      "what",
+      "where",
+      "please",
+      "latest",
+      "last",
+      "first",
+      "most",
+      "recent",
     ]);
     const words = msg
       .replace(/[^\w\s]/g, " ")
