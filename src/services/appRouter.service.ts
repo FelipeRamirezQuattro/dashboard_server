@@ -42,6 +42,7 @@ class AppRouterService {
   private getAppApiKey(appName: string): string | undefined {
     const apiKeyMap: Record<string, string | undefined> = {
       "Chemical Tracker": env.chemtrackerChatbotApiKey,
+      "Designer": env.designerChatbotApiKey,
     };
 
     return apiKeyMap[appName];

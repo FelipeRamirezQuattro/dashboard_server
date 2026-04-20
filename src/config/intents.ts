@@ -16,6 +16,30 @@ export const intents: Intent[] = [
     keywords: ["chemical", "tracker", "chem", "track", "wells", "clients"],
     response: "ROUTE:Chemical Tracker",
   },
+  // Designer queries - route directly without AI
+  {
+    patterns: [
+      /\bdesigner\b/i,
+      /\b(proposal|proposals)\b.*\b(for|from)\b/i,
+      /\bsales\s*order\b.*\b(for|from)\b/i,
+      /\btechnical\s*proposal/i,
+      /\bwell\s*design/i,
+      /\bwellbore/i,
+      /\btally\b.*\b(design|report|for)\b/i,
+      /\bpulling\s*design/i,
+      /\bengineering\s*calc/i,
+      /\bproduct\s*config/i,
+      /\b(work|jobs?|projects?)\b.*\b(done|completed|performed)\b.*\bfor\b/i,
+      /\bwhat\b.*\b(work|jobs?|projects?)\b.*\bfor\b/i,
+      /\b(show|list|get|find|pull)\b.*\b(proposal|proposals|sales\s*order)\b/i,
+      /\blatest\s*(proposal|sales\s*order)/i,
+      /\b(client|customer)\b.*\b(proposal|order|work)/i,
+      /\bsimulation\b.*\b(gas|sand|chemical)/i,
+      /\b(gas|sand|chemical)\b.*\bsimulation/i,
+    ],
+    keywords: ["designer", "proposal", "sales", "order", "well", "design", "tally", "engineering"],
+    response: "ROUTE:Designer",
+  },
   {
     patterns: [
       /what does osi (separator )?inc\.? do/i,

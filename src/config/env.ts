@@ -22,9 +22,11 @@ interface EnvConfig {
   // AI Chatbot Configuration (Optional)
   openaiApiKey?: string;
   openaiModel?: string;
+  anthropicApiKey?: string;
   enableAiFallback: boolean;
   // External app chatbot service-to-service API keys (Optional)
   chemtrackerChatbotApiKey?: string;
+  designerChatbotApiKey?: string;
   // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
   enableN8nChatbot: boolean;
   n8nWebhookUrl: string;
@@ -85,7 +87,9 @@ export const env: EnvConfig = {
   enableAiFallback:
     process.env.ENABLE_AI_FALLBACK?.toLowerCase() === "true" || false,
   // External app chatbot service-to-service API keys (Optional)
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   chemtrackerChatbotApiKey: process.env.CHEMTRACKER_CHATBOT_API_KEY,
+  designerChatbotApiKey: process.env.DESIGNER_CHATBOT_API_KEY,
   // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
   enableN8nChatbot:
     process.env.ENABLE_N8N_CHATBOT?.toLowerCase() === "true" || false,

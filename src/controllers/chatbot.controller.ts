@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { chatbotService } from "../services/chatbot.service";
 import { n8nWebhookProvider } from "../services/n8nWebhook.service";
 import { documentLookupService } from "../services/documentLookup.service";
+import { tryDirectAppRoute } from "../services/directAppRouter.service";
 import { env } from "../config/env";
 import logger from "../utils/logger";
 
@@ -42,7 +43,21 @@ export const sendMessage = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Step 2: n8n webhook or legacy hybrid provider ───────────────
+    // ── Step 2: Direct app routing via pattern match ────────────────
+    // If the message matches a known app pattern (Designer, Chemical Tracker, etc.)
+    // call that app's chatbot API directly — no n8n or AI needed.
+    const appResponse = await tryDirectAppRoute(message, userId, { history });
+    if (appResponse) {
+      logger.info(`Direct app route matched for: "${message.substring(0, 50)}..."`);
+      return res.status(200).json({
+        reply: appResponse.reply,
+        timestamp: appResponse.timestamp,
+        confidence: appResponse.confidence,
+        sessionId: effectiveSessionId,
+      });
+    }
+
+    // ── Step 3: n8n webhook or legacy hybrid provider ───────────────
     // Switch between n8n webhook approach and legacy hybrid approach via env flag.
     // Set ENABLE_N8N_CHATBOT=true in .env to use the n8n workflow.
     const response = env.enableN8nChatbot

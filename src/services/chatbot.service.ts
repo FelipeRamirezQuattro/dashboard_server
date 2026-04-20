@@ -6,9 +6,20 @@ import {
 import { intents, fallbackResponse } from "../config/intents";
 import logger from "../utils/logger";
 import { chemicalTrackerService } from "./chemicalTracker.service";
-import { AIChatProvider } from "./ai.provider";
+import { AIChatProvider as _AIChatProvider } from "./ai.provider"; // retained for future use
 import { appRouterService } from "./appRouter.service";
 import { env } from "../config/env";
+import Anthropic from "@anthropic-ai/sdk";
+import FileBank from "../models/FileBank.model";
+import ExternalApp from "../models/App.model";
+
+const slugify = (name: string): string => {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+  return /^[0-9]/.test(slug) ? `app_${slug}` : slug;
+};
 
 /**
  * HardcodedChatProvider
@@ -242,32 +253,25 @@ class HardcodedChatProvider implements ChatProvider {
 
 /**
  * HybridChatProvider
- * Uses pattern matching first (fast, free), falls back to AI (flexible, costs money)
- * Best of both worlds approach
+ * Step A: Static pattern matching (HardcodedChatProvider — unchanged)
+ * Step B: FileBank lookup (case-insensitive substring match on name/description/tags)
+ * Step C: Claude tool-use routing over active ExternalApps (ENABLE_AI_FALLBACK=true only)
  */
 class HybridChatProvider implements ChatProvider {
   private hardcodedProvider: HardcodedChatProvider;
-  private aiProvider: AIChatProvider | null;
   private aiEnabled: boolean;
+  private claudeClient?: Anthropic;
 
   constructor() {
     this.hardcodedProvider = new HardcodedChatProvider();
-    this.aiProvider = null;
-    this.aiEnabled = env.enableAiFallback && !!env.openaiApiKey;
+    this.aiEnabled = env.enableAiFallback && !!env.anthropicApiKey;
 
     if (this.aiEnabled) {
-      this.aiProvider = new AIChatProvider();
-      if (this.aiProvider.isReady()) {
-        logger.info("Hybrid Chat Provider: AI fallback enabled");
-      } else {
-        logger.warn(
-          "Hybrid Chat Provider: AI fallback disabled (initialization failed)",
-        );
-        this.aiEnabled = false;
-      }
+      this.claudeClient = new Anthropic({ apiKey: env.anthropicApiKey });
+      logger.info("Hybrid Chat Provider: Claude tool-use routing enabled");
     } else {
       logger.info(
-        "Hybrid Chat Provider: AI fallback disabled (pattern-matching only)",
+        "Hybrid Chat Provider: Claude routing disabled (pattern-matching + file bank only)",
       );
     }
   }
@@ -276,13 +280,12 @@ class HybridChatProvider implements ChatProvider {
     message: string,
     request?: ChatRequest,
   ): Promise<ChatResponse> {
-    // Step 1: Try pattern matching first (fast, no cost)
+    // ── Step A: Static intent matching (zero cost) ─────────────────
     const patternResponse = await this.hardcodedProvider.getResponse(
       message,
       request,
     );
 
-    // If pattern matching found a match (confidence > 0), use it
     if (patternResponse.confidence && patternResponse.confidence > 0) {
       logger.info(
         `Pattern match successful (confidence: ${patternResponse.confidence})`,
@@ -290,15 +293,167 @@ class HybridChatProvider implements ChatProvider {
       return patternResponse;
     }
 
-    // Step 2: If no pattern match, try AI fallback (if enabled)
-    if (this.aiEnabled && this.aiProvider) {
-      logger.info("No pattern match, using AI fallback");
-      return await this.aiProvider.getResponse(message, request);
+    // ── Step B: FileBank lookup ────────────────────────────────────
+    const fileBankResponse = await this.lookupFileBank(message);
+    if (fileBankResponse) {
+      return fileBankResponse;
     }
 
-    // Step 3: No pattern match and AI disabled, return fallback
-    logger.info("No pattern match and AI disabled, returning fallback");
-    return patternResponse; // Already has confidence 0 and fallback message
+    // ── Step C: Claude tool-use routing ────────────────────────────
+    if (this.aiEnabled) {
+      logger.info("No static/file match — trying Claude tool-use routing");
+      return await this.routeWithClaude(message, request);
+    }
+
+    // No match and AI disabled
+    logger.info("No match and AI disabled, returning fallback");
+    return patternResponse; // confidence 0, fallback message
+  }
+
+  /**
+   * Query the FileBank collection for a case-insensitive substring match
+   * against originalName, description, or any tag.
+   */
+  private async lookupFileBank(message: string): Promise<ChatResponse | null> {
+    try {
+      const normalized = message.toLowerCase();
+      const files = await FileBank.find();
+
+      for (const file of files) {
+        const nameMatch = file.originalName?.toLowerCase().includes(normalized) ?? false;
+        const descMatch = file.description?.toLowerCase().includes(normalized) ?? false;
+        const tagMatch = file.tags.some(
+          (tag) =>
+            normalized.includes(tag.toLowerCase()) ||
+            tag.toLowerCase().includes(normalized),
+        );
+
+        if (nameMatch || descMatch || tagMatch) {
+          logger.info(`FileBank match: "${file.originalName}"`);
+          return {
+            reply: `I found a file that may help you: **${file.originalName}**\n\nYou can download it here: ${file.downloadUrl}`,
+            timestamp: new Date(),
+            confidence: 0.85,
+          };
+        }
+      }
+    } catch (error) {
+      logger.error("Error querying FileBank:", error);
+    }
+    return null;
+  }
+
+  /**
+   * Call Claude claude-opus-4-5 with one tool per active ExternalApp that has chatbotApiUrl set.
+   * If Claude picks a tool → forward to appRouterService.queryApp().
+   * If Claude returns text → return it directly.
+   */
+  private async routeWithClaude(
+    message: string,
+    request?: ChatRequest,
+  ): Promise<ChatResponse> {
+    try {
+      const activeApps = await ExternalApp.find({
+        isActive: true,
+        chatbotApiUrl: { $exists: true, $ne: "" },
+      });
+
+      const tools: Anthropic.Tool[] = activeApps.map((app) => ({
+        name: slugify(app.name),
+        description: app.description,
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            message: {
+              type: "string",
+              description: "The user question to forward to this application",
+            },
+          },
+          required: ["message"],
+        },
+      }));
+
+      const client = this.claudeClient!;
+
+      const claudeResponse = await client.messages.create({
+        model: "claude-opus-4-5",
+        max_tokens: 1024,
+        system:
+          "You are the internal assistant for Odessa Separator Inc. (OSI). " +
+          "You have access to several internal applications as tools. " +
+          "When the user's question is about data that lives in one of those applications, " +
+          "call the appropriate tool. " +
+          "If the question is general OSI company knowledge (services, mission, business units, departments), " +
+          "answer it directly without calling any tool. " +
+          "Never guess application data — always use the tool.",
+        tools,
+        messages: [{ role: "user", content: message }],
+      });
+
+      // Check for tool_use block
+      const toolUseBlock = claudeResponse.content.find(
+        (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+      );
+
+      if (toolUseBlock) {
+        const rawInput = toolUseBlock.input as Record<string, unknown>;
+        const toolMessage = typeof rawInput?.message === "string" ? rawInput.message : message;
+        const matchedApp = activeApps.find(
+          (app) => slugify(app.name) === toolUseBlock.name,
+        );
+
+        if (matchedApp) {
+          logger.info(
+            `Claude routed to app: "${matchedApp.name}" (tool: ${toolUseBlock.name})`,
+          );
+          const appResponse = await appRouterService.queryApp(
+            matchedApp.name,
+            toolMessage,
+            request?.userId,
+            request?.context,
+          );
+          return {
+            reply: appResponse.reply,
+            timestamp: new Date(),
+            confidence: appResponse.success ? 0.9 : 0,
+          };
+        } else {
+          logger.warn(
+            `Claude selected tool "${toolUseBlock.name}" but no matching app was found`,
+          );
+        }
+      }
+
+      // Check for text block (direct answer, no tool call)
+      const textBlock = claudeResponse.content.find(
+        (block): block is Anthropic.TextBlock => block.type === "text",
+      );
+
+      if (textBlock) {
+        logger.info("Claude returned direct text response (no tool call)");
+        return {
+          reply: textBlock.text,
+          timestamp: new Date(),
+          confidence: 0.8,
+        };
+      }
+
+      // Unexpected response shape — return fallback
+      logger.warn("Claude returned no usable block");
+      return {
+        reply: fallbackResponse,
+        timestamp: new Date(),
+        confidence: 0,
+      };
+    } catch (error) {
+      logger.error("Error calling Claude API:", error);
+      return {
+        reply:
+          "I'm having trouble connecting to my AI routing system. Please try again.",
+        timestamp: new Date(),
+        confidence: 0,
+      };
+    }
   }
 }
 

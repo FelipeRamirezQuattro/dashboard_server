@@ -22,6 +22,7 @@ import departmentRoutes from "./routes/department.routes";
 import permissionsRoutes from "./routes/permissions.routes";
 import chatbotRoutes from "./routes/chatbot.routes";
 import notificationRoutes from "./routes/notification.routes";
+import fileBankRoutes from "./routes/fileBank.routes";
 
 const app: Application = express();
 
@@ -108,6 +109,7 @@ app.use("/api-dashboard/departments", departmentRoutes);
 app.use("/api-dashboard/permissions", permissionsRoutes);
 app.use("/api-dashboard/chatbot", chatbotRoutes);
 app.use("/api-dashboard/notifications", notificationRoutes);
+app.use("/api-dashboard/file-bank", fileBankRoutes);
 
 // 404 handler
 app.use(notFound);
