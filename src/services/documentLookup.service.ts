@@ -1,5 +1,6 @@
 import logger from "../utils/logger";
 import { ChatResponse } from "../types/chatbot.types";
+import FileBank from "../models/FileBank.model";
 
 /**
  * Known document metadata for richer responses.
@@ -249,6 +250,60 @@ class DocumentLookupService {
     reply += "\nClick any link above to download!";
 
     return { reply, timestamp: new Date(), confidence: 1.0 };
+  }
+
+  /**
+   * Search the File Bank using MongoDB full-text search.
+   * Runs after the static registry check. Returns null if no match.
+   */
+  async fileBankSearch(message: string): Promise<ChatResponse | null> {
+    try {
+      const msg = message.trim();
+      if (msg.length < 3) return null;
+
+      // Use MongoDB $text search against the searchText index
+      const results = await FileBank.find(
+        { $text: { $search: msg } },
+        { score: { $meta: "textScore" } },
+      )
+        .sort({ score: { $meta: "textScore" } })
+        .limit(5)
+        .lean();
+
+      if (!results.length) return null;
+
+      // Filter to only results with a reasonable relevance score
+      const topScore = (results[0] as any).score as number;
+      if (topScore < 1.0) return null;
+
+      const relevant = results.filter(
+        (r) => ((r as any).score as number) >= topScore * 0.6,
+      );
+
+      if (relevant.length === 1) {
+        const file = relevant[0];
+        let reply = `I found a file in the File Bank! 📄\n\n`;
+        reply += `📄 **${file.originalName}**\n`;
+        if (file.description) reply += `📝 ${file.description}\n`;
+        if (file.tags?.length) reply += `🏷️ Tags: ${file.tags.join(", ")}\n`;
+        reply += `\n🔗 [Download ${file.originalName}](${file.downloadUrl})`;
+        reply += "\n\nClick the link above to download the file!";
+        return { reply, timestamp: new Date(), confidence: 0.9 };
+      }
+
+      let reply = `I found ${relevant.length} files in the File Bank! 📄\n`;
+      for (const file of relevant) {
+        reply += `\n📄 **${file.originalName}**`;
+        if (file.description) reply += `\n📝 ${file.description}`;
+        if (file.tags?.length) reply += `\n🏷️ Tags: ${file.tags.join(", ")}`;
+        reply += `\n🔗 [Download ${file.originalName}](${file.downloadUrl})\n`;
+      }
+      reply += "\nClick any link above to download!";
+      return { reply, timestamp: new Date(), confidence: 0.9 };
+    } catch (error) {
+      logger.error("FileBank text search failed:", error);
+      return null;
+    }
   }
 }
 

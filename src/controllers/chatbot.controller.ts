@@ -31,7 +31,7 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     const userEmail = req.user?.email;
 
-    // ── Step 1: Local document lookup (instant, zero-cost) ──────────
+    // ── Step 1a: Static document registry (instant, zero-cost) ─────
     const docResponse = documentLookupService.lookup(message);
     if (docResponse) {
       logger.info(`Document match found for: "${message.substring(0, 50)}..."`);
@@ -39,6 +39,18 @@ export const sendMessage = async (req: Request, res: Response) => {
         reply: docResponse.reply,
         timestamp: docResponse.timestamp,
         confidence: docResponse.confidence,
+        sessionId: effectiveSessionId,
+      });
+    }
+
+    // ── Step 1b: File Bank text search ──────────────────────────────
+    const fileBankResponse = await documentLookupService.fileBankSearch(message);
+    if (fileBankResponse) {
+      logger.info(`File Bank match found for: "${message.substring(0, 50)}..."`);
+      return res.status(200).json({
+        reply: fileBankResponse.reply,
+        timestamp: fileBankResponse.timestamp,
+        confidence: fileBankResponse.confidence,
         sessionId: effectiveSessionId,
       });
     }
