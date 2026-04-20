@@ -44,9 +44,12 @@ export const sendMessage = async (req: Request, res: Response) => {
     }
 
     // ── Step 1b: File Bank text search ──────────────────────────────
-    const fileBankResponse = await documentLookupService.fileBankSearch(message);
+    const fileBankResponse =
+      await documentLookupService.fileBankSearch(message);
     if (fileBankResponse) {
-      logger.info(`File Bank match found for: "${message.substring(0, 50)}..."`);
+      logger.info(
+        `File Bank match found for: "${message.substring(0, 50)}..."`,
+      );
       return res.status(200).json({
         reply: fileBankResponse.reply,
         timestamp: fileBankResponse.timestamp,
@@ -60,7 +63,9 @@ export const sendMessage = async (req: Request, res: Response) => {
     // call that app's chatbot API directly — no n8n or AI needed.
     const appResponse = await tryDirectAppRoute(message, userId, { history });
     if (appResponse) {
-      logger.info(`Direct app route matched for: "${message.substring(0, 50)}..."`);
+      logger.info(
+        `Direct app route matched for: "${message.substring(0, 50)}..."`,
+      );
       return res.status(200).json({
         reply: appResponse.reply,
         timestamp: appResponse.timestamp,

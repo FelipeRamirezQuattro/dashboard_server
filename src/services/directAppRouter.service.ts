@@ -25,9 +25,7 @@ export async function tryDirectAppRoute(
     for (const pattern of intent.patterns) {
       if (pattern instanceof RegExp && pattern.test(message)) {
         const appName = intent.response.replace("ROUTE:", "").trim();
-        logger.info(
-          `DirectAppRouter: pattern matched → routing to ${appName}`,
-        );
+        logger.info(`DirectAppRouter: pattern matched → routing to ${appName}`);
 
         try {
           const result = await appRouterService.queryApp(

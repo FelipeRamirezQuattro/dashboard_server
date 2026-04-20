@@ -37,7 +37,16 @@ export const intents: Intent[] = [
       /\bsimulation\b.*\b(gas|sand|chemical)/i,
       /\b(gas|sand|chemical)\b.*\bsimulation/i,
     ],
-    keywords: ["designer", "proposal", "sales", "order", "well", "design", "tally", "engineering"],
+    keywords: [
+      "designer",
+      "proposal",
+      "sales",
+      "order",
+      "well",
+      "design",
+      "tally",
+      "engineering",
+    ],
     response: "ROUTE:Designer",
   },
   {
