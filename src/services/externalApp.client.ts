@@ -152,6 +152,9 @@ class ExternalAppClient {
     }
 
     // Network error or timeout
+    logger.error(
+      `[ExternalAppClient] Network/setup error detail: ${error?.message || error}`,
+    );
     return {
       success: false,
       error: {

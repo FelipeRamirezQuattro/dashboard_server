@@ -137,6 +137,10 @@ class AppRouterService {
       const chatbotBaseUrl = this.normalizeChatbotBaseUrl(app.chatbotApiUrl);
       const appApiKey = this.getAppApiKey(appName);
 
+      logger.info(
+        `[${appName}] Connecting → baseUrl: "${chatbotBaseUrl}", endpoint: "${this.getChatbotEndpoint(appName)}", apiKey: ${appApiKey ? "present (" + appApiKey.substring(0, 8) + "...)" : "MISSING"}`,
+      );
+
       // Create client for this app
       const client = ExternalAppClientFactory.getClient(
         appName,
