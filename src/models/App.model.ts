@@ -72,13 +72,11 @@ const externalAppSchema = new Schema<IExternalApp>(
     businessUnitId: {
       type: Schema.Types.ObjectId,
       ref: "BusinessUnit",
-      required: true,
       index: true,
     },
     departmentId: {
       type: Schema.Types.ObjectId,
       ref: "Department",
-      required: true,
       index: true,
     },
     isActive: {

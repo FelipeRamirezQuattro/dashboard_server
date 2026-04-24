@@ -109,7 +109,7 @@ router.get(
   authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      if (!mongoose.isValidObjectId(req.params.id)) {
         res.status(400).json({ error: "Invalid file ID" });
         return;
       }
@@ -152,7 +152,7 @@ router.delete(
   requireAdmin,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      if (!mongoose.isValidObjectId(req.params.id)) {
         res.status(400).json({ error: "Invalid file ID" });
         return;
       }

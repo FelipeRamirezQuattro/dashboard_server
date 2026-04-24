@@ -18,7 +18,7 @@ export const getConversationHistory = async (
     return [];
   }
 
-  return conversation.turns.slice(-limit).map((turn) => ({
+  return conversation.turns.slice(-limit).map((turn: any) => ({
     role: turn.role,
     content: turn.content,
   }));

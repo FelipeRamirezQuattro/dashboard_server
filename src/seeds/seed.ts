@@ -154,7 +154,7 @@ const seedData = async (): Promise<void> => {
       },
     ];
 
-    const users = await User.insertMany(testUsers);
+    const users = await Promise.all(testUsers.map((u) => User.create(u)));
     logger.info(`Created ${users.length} test users`);
 
     logger.info("\n✅ Database seeded successfully!");

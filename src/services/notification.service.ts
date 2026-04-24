@@ -129,13 +129,13 @@ export const markAllAsRead = async (userId: string): Promise<void> => {
     unreadIds.map((id) => ({
       updateOne: {
         filter: {
-          userId: new Types.ObjectId(userId),
-          notificationId: new Types.ObjectId(id),
+          userId,
+          notificationId: id,
         },
         update: {
           $setOnInsert: {
-            userId: new Types.ObjectId(userId),
-            notificationId: new Types.ObjectId(id),
+            userId,
+            notificationId: id,
             readAt: new Date(),
           },
         },

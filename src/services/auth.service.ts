@@ -32,9 +32,8 @@ export const loginWithCredentials = async (
     throw new Error("Invalid email or password");
   }
 
-  // Update last login
-  user.lastLogin = new Date();
-  await user.save();
+  // Update last login without triggering pre-save hook on passwordHash
+  await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
 
   // Generate tokens
   const tokenPayload = {

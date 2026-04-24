@@ -32,7 +32,7 @@ export const getAppsForUser = async (user: IUser): Promise<IExternalApp[]> => {
 
   // Filter apps based on required role AND hierarchical permissions
   const accessibleApps = apps.filter((app) => {
-    const requiredRoleLevel = roleHierarchy[app.requiredRole];
+    const requiredRoleLevel = roleHierarchy[app.requiredRole as keyof typeof roleHierarchy];
     const hasRoleAccess = userRoleLevel >= requiredRoleLevel;
 
     // Check if user has permission to this app through hierarchy

@@ -82,7 +82,6 @@ const userSchema = new Schema<IUser>(
 
 // Index for efficient queries
 userSchema.index({ email: 1, isActive: 1 });
-userSchema.index({ microsoftId: 1 });
 
 // Virtual for full name
 userSchema.virtual("fullName").get(function () {
