@@ -9,6 +9,7 @@ import { env } from "../config/env";
 interface ChatbotQueryRequest {
   message: string;
   userId?: string;
+  sessionId?: string;
   context?: Record<string, any>;
 }
 
@@ -43,6 +44,8 @@ class AppRouterService {
     const apiKeyMap: Record<string, string | undefined> = {
       "Chemical Tracker": env.chemtrackerChatbotApiKey,
       "Designer": env.designerChatbotApiKey,
+      "OSI Pump Pro": env.pumpTrackerChatbotApiKey,
+      "Pump Tracker": env.pumpTrackerChatbotApiKey,
     };
 
     return apiKeyMap[appName];
@@ -61,6 +64,17 @@ class AppRouterService {
       .replace(/\/$/, "");
 
     return normalized;
+  }
+
+  private getAppNameCandidates(appName: string): string[] {
+    const aliases: Record<string, string[]> = {
+      "OSI Pump Pro": ["OSI Pump Pro", "Pump Tracker", "OSI Pump Tracker"],
+      "Pump Tracker": ["Pump Tracker", "OSI Pump Pro", "OSI Pump Tracker"],
+      Designer: ["Designer", "OSI Designer"],
+      "Chemical Tracker": ["Chemical Tracker", "Chem Tracker"],
+    };
+
+    return aliases[appName] || [appName];
   }
 
   /**
@@ -91,10 +105,14 @@ class AppRouterService {
     message: string,
     userId?: string,
     context?: Record<string, any>,
+    sessionId?: string,
   ): Promise<ChatbotQueryResponse> {
+    const startedAt = Date.now();
     try {
       // Get app from database to get its URL
-      const app = await ExternalApp.findOne({ name: appName });
+      const app = await ExternalApp.findOne({
+        name: { $in: this.getAppNameCandidates(appName) },
+      });
 
       if (!app) {
         return {
@@ -146,6 +164,7 @@ class AppRouterService {
         appName,
         chatbotBaseUrl,
         appApiKey,
+        env.chatbotConnectorTimeoutMs,
       );
 
       // Send query to app's chatbot endpoint
@@ -156,16 +175,18 @@ class AppRouterService {
       const request: ChatbotQueryRequest = {
         message,
         userId,
+        sessionId,
         context,
       };
 
       // Get the chatbot endpoint for this specific app
       const chatbotEndpoint = this.getChatbotEndpoint(appName);
 
-      const response = await client.post<ChatbotQueryResponse>(
-        chatbotEndpoint,
-        request,
-      );
+      let response = await client.post<ChatbotQueryResponse>(chatbotEndpoint, request);
+      if (!response.success && response.error?.code === "NETWORK_ERROR") {
+        logger.warn(`${appName} network error; retrying once`);
+        response = await client.post<ChatbotQueryResponse>(chatbotEndpoint, request);
+      }
 
       // Support two response shapes from external apps:
       // 1) Wrapped: { success, data: { success, reply, ... } }
@@ -178,12 +199,16 @@ class AppRouterService {
       const directResponse = response as unknown as ChatbotQueryResponse;
 
       if (wrappedResponse.success && wrappedResponse.data) {
-        logger.info(`${appName} responded successfully (wrapped format)`);
+        logger.info(
+          `${appName} responded successfully (wrapped format, ${Date.now() - startedAt}ms)`,
+        );
         return wrappedResponse.data;
       }
 
       if (directResponse.success && directResponse.reply) {
-        logger.info(`${appName} responded successfully (direct format)`);
+        logger.info(
+          `${appName} responded successfully (direct format, ${Date.now() - startedAt}ms)`,
+        );
         return directResponse;
       }
 
@@ -195,7 +220,7 @@ class AppRouterService {
         error: wrappedResponse.error,
       };
     } catch (error: any) {
-      logger.error(`Error querying ${appName}:`, error);
+      logger.error(`Error querying ${appName} after ${Date.now() - startedAt}ms:`, error);
       return {
         success: false,
         reply: `I couldn't connect to ${appName}. The service might be temporarily unavailable.`,

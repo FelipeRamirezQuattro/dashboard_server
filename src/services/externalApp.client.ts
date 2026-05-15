@@ -178,12 +178,13 @@ export class ExternalAppClientFactory {
     appName: string,
     baseURL: string,
     apiKey?: string,
+    timeout?: number,
   ): ExternalAppClient {
-    const key = `${appName}-${baseURL}-${apiKey || "no-key"}`;
+    const key = `${appName}-${baseURL}-${apiKey || "no-key"}-${timeout || "default"}`;
     if (!this.clients.has(key)) {
       const config: ExternalAppConfig = {
         baseURL,
-        timeout: 60000, // 60 seconds — external apps may run AI queries
+        timeout: timeout || 60000,
         apiKey,
       };
       this.clients.set(key, new ExternalAppClient(config, appName));

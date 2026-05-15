@@ -27,9 +27,20 @@ interface EnvConfig {
   // External app chatbot service-to-service API keys (Optional)
   chemtrackerChatbotApiKey?: string;
   designerChatbotApiKey?: string;
+  pumpTrackerChatbotApiKey?: string;
   // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
   enableN8nChatbot: boolean;
   n8nWebhookUrl: string;
+  chatbotAiRouterModel: string;
+  chatbotConnectorTimeoutMs: number;
+  chatbotToolApiKey?: string;
+  // OneDrive / SharePoint document source (Optional)
+  oneDriveClientId?: string;
+  oneDriveClientSecret?: string;
+  oneDriveTenantId?: string;
+  oneDriveDriveId?: string;
+  oneDriveFolderItemId?: string;
+  oneDriveFolderWebUrl?: string;
 }
 
 const requiredEnvVars = [
@@ -90,12 +101,27 @@ export const env: EnvConfig = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   chemtrackerChatbotApiKey: process.env.CHEMTRACKER_CHATBOT_API_KEY,
   designerChatbotApiKey: process.env.DESIGNER_CHATBOT_API_KEY,
+  pumpTrackerChatbotApiKey: process.env.PUMPTRACKER_CHATBOT_API_KEY,
   // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
   enableN8nChatbot:
     process.env.ENABLE_N8N_CHATBOT?.toLowerCase() === "true" || false,
   n8nWebhookUrl:
     process.env.N8N_WEBHOOK_URL ||
     "https://felipe-osi.app.n8n.cloud/webhook/osi-agent",
+  chatbotAiRouterModel: process.env.CHATBOT_AI_ROUTER_MODEL || "gpt-4o-mini",
+  chatbotConnectorTimeoutMs: parseInt(
+    process.env.CHATBOT_CONNECTOR_TIMEOUT_MS || "20000",
+    10,
+  ),
+  chatbotToolApiKey: process.env.CHATBOT_TOOL_API_KEY,
+  oneDriveClientId: process.env.ONEDRIVE_CLIENT_ID || process.env.AZURE_CLIENT_ID,
+  oneDriveClientSecret:
+    process.env.ONEDRIVE_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET,
+  oneDriveTenantId:
+    process.env.ONEDRIVE_TENANT_ID || process.env.AZURE_TENANT_ID,
+  oneDriveDriveId: process.env.ONEDRIVE_DRIVE_ID,
+  oneDriveFolderItemId: process.env.ONEDRIVE_FOLDER_ITEM_ID,
+  oneDriveFolderWebUrl: process.env.ONEDRIVE_FOLDER_WEB_URL,
 };
 
 export default env;

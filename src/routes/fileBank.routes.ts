@@ -7,6 +7,8 @@ import mongoose from "mongoose";
 import { authenticate } from "../middleware/auth.middleware";
 import { requireAdmin } from "../middleware/role.middleware";
 import FileBank from "../models/FileBank.model";
+import { extractTextFromFile } from "../services/documentText.service";
+import { oneDriveService } from "../services/oneDrive.service";
 import logger from "../utils/logger";
 
 const router = Router();
@@ -68,6 +70,9 @@ router.post(
         sizeBytes: req.file.size,
         description,
         tags: parsedTags,
+        contentText: await extractTextFromFile(req.file.path, req.file.mimetype),
+        source: "local",
+        syncStatus: "indexed",
         uploadedBy: req.user?.id || "unknown",
         uploadedAt: new Date(),
         filePath: req.file.path,
@@ -99,6 +104,39 @@ router.get(
     } catch (error) {
       logger.error("Error fetching file bank:", error);
       res.status(500).json({ error: "Failed to fetch files" });
+    }
+  },
+);
+
+// POST /api-dashboard/file-bank/onedrive/sync
+router.post(
+  "/onedrive/sync",
+  authenticate,
+  requireAdmin,
+  async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const result = await oneDriveService.syncFolder();
+      res.json({ message: "OneDrive sync completed", ...result });
+    } catch (error) {
+      logger.error("OneDrive sync failed:", error);
+      res.status(500).json({
+        error: (error as Error).message || "Failed to sync OneDrive folder",
+      });
+    }
+  },
+);
+
+// GET /api-dashboard/file-bank/onedrive/status
+router.get(
+  "/onedrive/status",
+  authenticate,
+  requireAdmin,
+  async (_req: Request, res: Response): Promise<void> => {
+    try {
+      res.json(await oneDriveService.getStatus());
+    } catch (error) {
+      logger.error("OneDrive status failed:", error);
+      res.status(500).json({ error: "Failed to get OneDrive status" });
     }
   },
 );
