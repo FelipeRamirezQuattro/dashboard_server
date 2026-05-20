@@ -16,6 +16,8 @@ export interface IFileBank extends Document {
   lastModifiedAt?: Date;
   syncStatus: "indexed" | "failed" | "pending";
   syncError?: string;
+  storageProvider?: "local" | "s3" | "onedrive";
+  s3Key?: string;
   uploadedBy: string;
   uploadedAt: Date;
   filePath: string;
@@ -47,6 +49,13 @@ const fileBankSchema = new Schema<IFileBank>({
     default: "indexed",
   },
   syncError: { type: String, trim: true },
+  storageProvider: {
+    type: String,
+    enum: ["local", "s3", "onedrive"],
+    default: "local",
+    index: true,
+  },
+  s3Key: { type: String, trim: true },
   uploadedBy: { type: String, required: true },
   uploadedAt: { type: Date, default: Date.now },
   filePath: { type: String, default: "" },

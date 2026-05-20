@@ -73,16 +73,20 @@ class DocumentSearchService {
     return DOCUMENT_QUERY_RE.test(message);
   }
 
-  async search(query: string, limit = 5): Promise<DocumentSearchResult[]> {
+  async search(
+    query: string,
+    limit = 5,
+    source?: "local" | "onedrive",
+  ): Promise<DocumentSearchResult[]> {
     const trimmed = query.trim();
     if (trimmed.length < 2) return [];
 
-    const textResults = await this.textSearch(trimmed, limit);
+    const textResults = await this.textSearch(trimmed, limit, source);
     if (textResults.length) {
       return textResults;
     }
 
-    return this.regexSearch(trimmed, limit);
+    return this.regexSearch(trimmed, limit, source);
   }
 
   toChatResponse(results: DocumentSearchResult[]): ChatResponse | null {
@@ -130,10 +134,14 @@ class DocumentSearchService {
   private async textSearch(
     query: string,
     limit: number,
+    source?: "local" | "onedrive",
   ): Promise<DocumentSearchResult[]> {
     try {
       const results = await FileBank.find(
-        { $text: { $search: query } },
+        {
+          ...(source ? { source } : {}),
+          $text: { $search: query },
+        },
         { score: { $meta: "textScore" } },
       )
         .sort({ score: { $meta: "textScore" } })
@@ -159,12 +167,14 @@ class DocumentSearchService {
   private async regexSearch(
     query: string,
     limit: number,
+    source?: "local" | "onedrive",
   ): Promise<DocumentSearchResult[]> {
     const words = tokenize(query);
     if (!words.length) return [];
 
     const regexes = words.slice(0, 8).map((word) => new RegExp(escapeRegExp(word), "i"));
     const files = await FileBank.find({
+      ...(source ? { source } : {}),
       $or: regexes.flatMap((regex) => [
         { originalName: regex },
         { description: regex },

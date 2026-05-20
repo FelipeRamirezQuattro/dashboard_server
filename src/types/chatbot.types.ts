@@ -15,6 +15,7 @@ export interface ChatRequest {
       role: "user" | "assistant";
       content: string;
     }>;
+    target?: ChatTarget;
   };
 }
 
@@ -22,7 +23,15 @@ export interface ChatResponse {
   reply: string;
   timestamp: Date;
   confidence?: number;
-  source?: "static" | "file_bank" | "onedrive" | "app" | "ai" | "n8n" | "error";
+  source?:
+    | "static"
+    | "file_bank"
+    | "onedrive"
+    | "app"
+    | "ai"
+    | "workflow_brain"
+    | "n8n"
+    | "error";
   routedTo?: string;
   documents?: ChatDocumentResult[];
 }
@@ -34,6 +43,13 @@ export interface ChatDocumentResult {
   source: "local" | "onedrive";
   description?: string;
   tags?: string[];
+}
+
+export interface ChatTarget {
+  type: "auto" | "workflow_brain" | "external_app" | "file_bank";
+  workflowBrainCategoryId?: string;
+  appName?: string;
+  documentSource?: "all" | "local" | "onedrive";
 }
 
 export interface Intent {

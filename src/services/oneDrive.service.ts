@@ -205,6 +205,7 @@ class OneDriveService {
           searchText,
           contentText: summary,
           source: "onedrive",
+          storageProvider: "onedrive",
           externalId: item.id,
           webUrl: item.webUrl,
           downloadUrl: item.webUrl || "",

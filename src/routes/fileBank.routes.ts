@@ -7,30 +7,15 @@ import mongoose from "mongoose";
 import { authenticate } from "../middleware/auth.middleware";
 import { requireAdmin } from "../middleware/role.middleware";
 import FileBank from "../models/FileBank.model";
-import { extractTextFromFile } from "../services/documentText.service";
+import { extractTextFromBuffer } from "../services/documentText.service";
 import { oneDriveService } from "../services/oneDrive.service";
+import { s3FileStorageService } from "../services/s3FileStorage.service";
 import logger from "../utils/logger";
 
 const router = Router();
 
-// Ensure upload directory exists at module load time
-const UPLOAD_DIR = path.join(process.cwd(), "uploads", "file-bank");
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-// Multer disk storage — UUID-based filenames to avoid collisions
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, UPLOAD_DIR);
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const storedName = `${crypto.randomUUID()}${ext}`;
-    cb(null, storedName);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max
 });
 
@@ -47,6 +32,14 @@ router.post(
         return;
       }
 
+      if (!s3FileStorageService.isConfigured()) {
+        res.status(503).json({
+          error:
+            "File Bank S3 storage is not configured. Set AWS_REGION and AWS_S3_BUCKET.",
+        });
+        return;
+      }
+
       const { description = "", tags = "" } = req.body as {
         description?: string;
         tags?: string;
@@ -60,22 +53,38 @@ router.post(
         : [];
 
       const fileId = new mongoose.Types.ObjectId();
-      const downloadUrl = `/api-dashboard/file-bank/${fileId}/download`;
+      const ext = path.extname(req.file.originalname);
+      const storedName = `${crypto.randomUUID()}${ext}`;
+      const s3Key = `file-bank/${storedName}`;
+      const downloadUrl = `/file-bank/${fileId}/download`;
+      const contentText = await extractTextFromBuffer(
+        req.file.buffer,
+        req.file.mimetype,
+        req.file.originalname,
+      );
+
+      await s3FileStorageService.uploadObject(
+        s3Key,
+        req.file.buffer,
+        req.file.mimetype,
+      );
 
       const fileBank = new FileBank({
         _id: fileId,
         originalName: req.file.originalname,
-        storedName: req.file.filename,
+        storedName,
         mimeType: req.file.mimetype,
         sizeBytes: req.file.size,
         description,
         tags: parsedTags,
-        contentText: await extractTextFromFile(req.file.path, req.file.mimetype),
+        contentText,
         source: "local",
+        storageProvider: "s3",
+        s3Key,
         syncStatus: "indexed",
         uploadedBy: req.user?.id || "unknown",
         uploadedAt: new Date(),
-        filePath: req.file.path,
+        filePath: s3FileStorageService.toUri(s3Key),
         downloadUrl,
       });
 
@@ -157,7 +166,10 @@ router.get(
         return;
       }
 
-      if (!fs.existsSync(fileRecord.filePath)) {
+      if (
+        fileRecord.storageProvider !== "s3" &&
+        (!fileRecord.filePath || !fs.existsSync(fileRecord.filePath))
+      ) {
         res.status(404).json({ error: "File missing from disk" });
         return;
       }
@@ -168,8 +180,12 @@ router.get(
       );
       res.setHeader("Content-Type", fileRecord.mimeType);
 
-      const stream = fs.createReadStream(fileRecord.filePath);
-      stream.on("error", (err) => {
+      const stream =
+        fileRecord.storageProvider === "s3" && fileRecord.s3Key
+          ? await s3FileStorageService.getObjectStream(fileRecord.s3Key)
+          : fs.createReadStream(fileRecord.filePath);
+
+      stream.on("error", (err: Error) => {
         logger.error("Error streaming file:", err);
         if (!res.headersSent) {
           res.status(500).json({ error: "Failed to stream file" });
@@ -200,7 +216,9 @@ router.delete(
         return;
       }
 
-      if (fs.existsSync(fileRecord.filePath)) {
+      if (fileRecord.storageProvider === "s3" && fileRecord.s3Key) {
+        await s3FileStorageService.deleteObject(fileRecord.s3Key);
+      } else if (fileRecord.filePath && fs.existsSync(fileRecord.filePath)) {
         fs.unlinkSync(fileRecord.filePath);
       }
 

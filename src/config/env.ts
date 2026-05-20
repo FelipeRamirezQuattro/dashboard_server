@@ -41,6 +41,12 @@ interface EnvConfig {
   oneDriveDriveId?: string;
   oneDriveFolderItemId?: string;
   oneDriveFolderWebUrl?: string;
+  // AWS S3 File Bank object storage
+  awsRegion?: string;
+  awsS3Bucket?: string;
+  awsAccessKeyId?: string;
+  awsSecretAccessKey?: string;
+  awsS3Endpoint?: string;
 }
 
 const requiredEnvVars = [
@@ -122,6 +128,11 @@ export const env: EnvConfig = {
   oneDriveDriveId: process.env.ONEDRIVE_DRIVE_ID,
   oneDriveFolderItemId: process.env.ONEDRIVE_FOLDER_ITEM_ID,
   oneDriveFolderWebUrl: process.env.ONEDRIVE_FOLDER_WEB_URL,
+  awsRegion: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION,
+  awsS3Bucket: process.env.AWS_S3_BUCKET,
+  awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  awsS3Endpoint: process.env.AWS_S3_ENDPOINT,
 };
 
 export default env;

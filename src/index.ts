@@ -23,6 +23,7 @@ import permissionsRoutes from "./routes/permissions.routes";
 import chatbotRoutes from "./routes/chatbot.routes";
 import notificationRoutes from "./routes/notification.routes";
 import fileBankRoutes from "./routes/fileBank.routes";
+import workflowBrainRoutes from "./routes/workflowBrain.routes";
 
 const app: Application = express();
 
@@ -110,6 +111,7 @@ app.use("/api-dashboard/permissions", permissionsRoutes);
 app.use("/api-dashboard/chatbot", chatbotRoutes);
 app.use("/api-dashboard/notifications", notificationRoutes);
 app.use("/api-dashboard/file-bank", fileBankRoutes);
+app.use("/api-dashboard/workflow-brain", workflowBrainRoutes);
 
 // 404 handler
 app.use(notFound);

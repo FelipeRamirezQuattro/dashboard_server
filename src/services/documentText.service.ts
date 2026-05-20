@@ -49,3 +49,43 @@ export const extractTextFromFile = async (
 
   return "";
 };
+
+export const extractTextFromBuffer = async (
+  buffer: Buffer,
+  mimeType: string,
+  filename: string,
+): Promise<string> => {
+  try {
+    const ext = path.extname(filename).toLowerCase();
+
+    if (mimeType === "application/pdf" || ext === ".pdf") {
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const result = await parser.getText();
+        return normalizeExtractedText(result.text || "");
+      } finally {
+        await parser.destroy();
+      }
+    }
+
+    if (
+      mimeType ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      ext === ".docx"
+    ) {
+      const result = await mammoth.extractRawText({ buffer });
+      return normalizeExtractedText(result.value || "");
+    }
+
+    if (
+      mimeType.startsWith("text/") ||
+      [".csv", ".tsv", ".md", ".json", ".txt"].includes(ext)
+    ) {
+      return normalizeExtractedText(buffer.toString("utf8"));
+    }
+  } catch (error) {
+    logger.warn(`Unable to extract text from ${filename}`, error);
+  }
+
+  return "";
+};

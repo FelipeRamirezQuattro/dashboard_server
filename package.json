@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
+    "@aws-sdk/client-s3": "^3.1050.0",
     "@types/express-session": "^1.18.2",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
@@ -34,7 +35,8 @@
     "passport": "^0.7.0",
     "passport-azure-ad": "^4.3.5",
     "pdf-parse": "^2.4.5",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
