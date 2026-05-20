@@ -110,14 +110,22 @@ export const markAsRead = async (
   userId: string,
   notificationId: string,
 ): Promise<void> => {
+  const userObjectId = new Types.ObjectId(userId);
+  const notificationObjectId = new Types.ObjectId(notificationId);
+
   await NotificationRead.findOneAndUpdate(
-    { userId, notificationId },
-    { userId, notificationId, readAt: new Date() },
+    { userId: userObjectId, notificationId: notificationObjectId },
+    {
+      userId: userObjectId,
+      notificationId: notificationObjectId,
+      readAt: new Date(),
+    },
     { upsert: true },
   );
 };
 
 export const markAllAsRead = async (userId: string): Promise<void> => {
+  const userObjectId = new Types.ObjectId(userId);
   const all = await getNotificationsForUser(userId);
   const unreadIds = all
     .filter((n) => !n.isRead)
@@ -126,22 +134,25 @@ export const markAllAsRead = async (userId: string): Promise<void> => {
   if (unreadIds.length === 0) return;
 
   await NotificationRead.bulkWrite(
-    unreadIds.map((id) => ({
-      updateOne: {
-        filter: {
-          userId,
-          notificationId: id,
-        },
-        update: {
-          $setOnInsert: {
-            userId,
-            notificationId: id,
-            readAt: new Date(),
+    unreadIds.map((id) => {
+      const notificationObjectId = new Types.ObjectId(id);
+      return {
+        updateOne: {
+          filter: {
+            userId: userObjectId,
+            notificationId: notificationObjectId,
           },
+          update: {
+            $setOnInsert: {
+              userId: userObjectId,
+              notificationId: notificationObjectId,
+              readAt: new Date(),
+            },
+          },
+          upsert: true,
         },
-        upsert: true,
-      },
-    })),
+      };
+    }),
   );
 };
 
