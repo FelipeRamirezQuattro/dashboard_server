@@ -8,6 +8,7 @@ import { oneDriveService } from "./oneDrive.service";
 import { workflowBrainChatService } from "./workflowBrainChat.service";
 import {
   appendConversationTurns,
+  clearConversationHistory,
   getConversationHistory,
   ContextTurn,
 } from "./conversation.service";
@@ -100,6 +101,10 @@ class ChatbotOrchestrator {
 
   async getHistory(userId: string, sessionId: string): Promise<ContextTurn[]> {
     return getConversationHistory(userId, sessionId, 50);
+  }
+
+  async clearHistory(userId: string, sessionId: string): Promise<void> {
+    await clearConversationHistory(userId, sessionId);
   }
 
   private async routeMessage(
@@ -197,12 +202,18 @@ class ChatbotOrchestrator {
     request: ChatRequest,
   ): Promise<ChatResponse> {
     const target = request.context?.target;
+    logger.info(
+      `[WorkflowBrainDebug][orchestrator:explicit] target=${JSON.stringify(target || null)} topLevelTarget=${JSON.stringify(request.target || null)} topLevelWorkflowBrainCategoryId=${request.workflowBrainCategoryId || ""}`,
+    );
 
     if (!target || target.type === "auto") {
       return this.clarifyResponse();
     }
 
     if (target.type === "workflow_brain") {
+      logger.info(
+        `[WorkflowBrainDebug][orchestrator:workflow_brain] categoryId=${target.workflowBrainCategoryId || ""} message="${message.slice(0, 120)}"`,
+      );
       if (!target.workflowBrainCategoryId) {
         return {
           reply: "Select a Workflow Brain category before asking this question.",
@@ -309,7 +320,7 @@ class ChatbotOrchestrator {
 
     if (
       /\b(workflow\s+brain|process\s+brain|design\s+brain|category\s+memory|workflow\s+category|osi\s+process|separator\s+workflow|design\s+checklist)\b/.test(msg) ||
-      /\b(workflow|process|handoff|checklist|bottleneck|unknown\s+areas?)\b.*\b(separator|design|engineering|qa|qc|proposal|sales)\b/.test(msg)
+      /\b(workflow|process|handoff|checklist|unknown\s+areas?)\b.*\b(separator|design|engineering|qa|qc|proposal|sales)\b/.test(msg)
     ) {
       return {
         route: "workflow_brain",
@@ -351,7 +362,7 @@ class ChatbotOrchestrator {
           {
             role: "system",
             content:
-              "Route OSI assistant requests. Return only JSON with route, query, confidence, and optional category. Routes: file_bank, onedrive, chemical_tracker, designer, pump_tracker, workflow_brain, general, clarify. Use file_bank/onedrive for documents, PDFs, reports, invoices, proposals requested as files. Use chemical_tracker for wells, clients, chemicals, analytics. Use designer for proposals, sales orders, designs, tallies, simulations. Use pump_tracker for pump status, pump reports, pump performance. Use workflow_brain for process memory, workflow notes, category memory, design checklists, OSI process questions, separator workflow, handoff risks, bottlenecks, unknown areas, and operational/design-support workflow guidance.",
+              "Route OSI assistant requests. Return only JSON with route, query, confidence, and optional category. Routes: file_bank, onedrive, chemical_tracker, designer, pump_tracker, workflow_brain, general, clarify. Use file_bank/onedrive for documents, PDFs, reports, invoices, proposals requested as files. Use chemical_tracker for wells, clients, chemicals, analytics. Use designer for proposals, sales orders, designs, tallies, simulations. Use pump_tracker for pump status, pump reports, pump performance. Use workflow_brain for process memory, workflow notes, category memory, design checklists, OSI process questions, separator workflow, handoff risks, unknown areas, and operational/design-support workflow guidance.",
           },
           ...history.slice(-8).map((turn) => ({
             role: turn.role,

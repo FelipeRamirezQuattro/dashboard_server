@@ -10,6 +10,8 @@ export interface ChatRequest {
   userId?: string;
   userEmail?: string;
   sessionId?: string;
+  target?: ChatTarget;
+  workflowBrainCategoryId?: string;
   context?: {
     history?: Array<{
       role: "user" | "assistant";

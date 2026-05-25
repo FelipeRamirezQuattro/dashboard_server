@@ -1,11 +1,9 @@
 import mongoose from "mongoose";
 import {
-  BrainBottleneck,
   BrainDesignOutput,
   BrainEntity,
   BrainInsight,
   BrainMemory,
-  BrainRecommendation,
   BrainUnknownArea,
   BrainWorkflowEdge,
   BrainWorkflowStep,
@@ -75,7 +73,6 @@ const upsertAnalysis = async (
   const categoryObjectId = objectId(categoryId);
   const entityMap = new Map<string, mongoose.Types.ObjectId>();
   const stepMap = new Map<string, mongoose.Types.ObjectId>();
-  const bottleneckMap = new Map<string, mongoose.Types.ObjectId>();
 
   for (const entity of analysis.entities) {
     const existing = await BrainEntity.findOne({
@@ -144,48 +141,6 @@ const upsertAnalysis = async (
     await BrainWorkflowEdge.findOneAndUpdate(
       { categoryId: categoryObjectId, fromStepId, toStepId },
       { categoryId: categoryObjectId, fromStepId, toStepId, label: edge.label },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-  }
-
-  for (const bottleneck of analysis.bottlenecks) {
-    const relatedStepIds = bottleneck.relatedStepNames
-      .map((name) => stepMap.get(name))
-      .filter((id): id is mongoose.Types.ObjectId => Boolean(id));
-    const saved = await BrainBottleneck.findOneAndUpdate(
-      { categoryId: categoryObjectId, title: bottleneck.title },
-      {
-        categoryId: categoryObjectId,
-        title: bottleneck.title,
-        description: bottleneck.description,
-        severity: bottleneck.severity,
-        category: bottleneck.category,
-        relatedStepIds,
-        $addToSet: { sourceMemoryIds: sourceMemoryId },
-        status: "open",
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-    bottleneckMap.set(bottleneck.title, saved._id);
-  }
-
-  for (const recommendation of analysis.recommendations) {
-    const relatedBottleneckIds = recommendation.relatedBottleneckTitles
-      .map((title) => bottleneckMap.get(title))
-      .filter((id): id is mongoose.Types.ObjectId => Boolean(id));
-    await BrainRecommendation.findOneAndUpdate(
-      { categoryId: categoryObjectId, title: recommendation.title },
-      {
-        categoryId: categoryObjectId,
-        title: recommendation.title,
-        description: recommendation.description,
-        recommendationType: recommendation.recommendationType,
-        estimatedImpact: recommendation.estimatedImpact,
-        difficulty: recommendation.difficulty,
-        requiredInputs: recommendation.requiredInputs,
-        implementationNotes: recommendation.implementationNotes,
-        relatedBottleneckIds,
-      },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
   }
@@ -349,18 +304,4 @@ export const createWorkflowStep = async (
     status: data.status || "active",
     sourceMemoryIds: [],
   });
-};
-
-export const resolveBottleneck = async (categoryId: string, bottleneckId: string) => {
-  if (
-    !mongoose.Types.ObjectId.isValid(categoryId) ||
-    !mongoose.Types.ObjectId.isValid(bottleneckId)
-  ) {
-    return null;
-  }
-  return BrainBottleneck.findOneAndUpdate(
-    { _id: bottleneckId, categoryId },
-    { status: "resolved" },
-    { new: true },
-  );
 };

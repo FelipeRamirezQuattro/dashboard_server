@@ -1,9 +1,6 @@
 import mongoose from "mongoose";
 import {
-  BrainBottleneck,
   BrainMemory,
-  BrainRecommendation,
-  BrainUnknownArea,
   WorkflowBrainCategory,
   WorkflowBrainDomain,
 } from "../models/WorkflowBrain.model";
@@ -44,7 +41,7 @@ const seedGasMemory = [
   "Separator requests require flow rate, operating pressure, temperature, gas composition, liquid loading, and expected sand content.",
   "Sales often receives customer requests before all field data is complete.",
   "Engineering reviews separator requests after sales gathers initial information.",
-  "Final equipment recommendations require engineering review.",
+  "Final equipment guidance requires engineering review.",
 ];
 
 export const ensureSeedCategories = async (userId?: string): Promise<void> => {
@@ -67,7 +64,7 @@ export const ensureSeedCategories = async (userId?: string): Promise<void> => {
   const gasCategory = categories.find((category) => category.domain === "gas_separation");
   if (!gasCategory) return;
 
-  const memoryDocs = await BrainMemory.insertMany([
+  await BrainMemory.insertMany([
     ...seedGasMemory.map((content) => ({
       categoryId: gasCategory._id,
       content,
@@ -89,50 +86,6 @@ export const ensureSeedCategories = async (userId?: string): Promise<void> => {
       createdBy,
       updatedBy: createdBy,
     },
-  ]);
-
-  const sourceMemoryIds = memoryDocs.map((memory) => memory._id);
-
-  await Promise.all([
-    BrainBottleneck.create({
-      categoryId: gasCategory._id,
-      title: "Missing field data delays engineering review",
-      description:
-        "Sales sometimes routes separator requests before required field data is complete.",
-      severity: "high",
-      category: "field_data_gap",
-      sourceMemoryIds,
-      status: "open",
-    }),
-    BrainRecommendation.create({
-      categoryId: gasCategory._id,
-      title: "Create a separator request intake checklist before engineering handoff",
-      description:
-        "Standardize required separator design inputs before engineering review starts.",
-      recommendationType: "documentation",
-      estimatedImpact: "high",
-      difficulty: "easy",
-      requiredInputs: [
-        "Flow rate",
-        "Operating pressure",
-        "Temperature",
-        "Gas composition",
-        "Liquid loading",
-        "Expected sand content",
-      ],
-      implementationNotes:
-        "Use the checklist as a request completeness gate and document assumptions before handoff.",
-    }),
-    BrainUnknownArea.create({
-      categoryId: gasCategory._id,
-      title: "Request completeness owner is unclear",
-      description:
-        "The category memory has not identified who validates request completeness before engineering review.",
-      severity: "medium",
-      suggestedQuestion:
-        "Who confirms separator request completeness before engineering starts review?",
-      status: "open",
-    }),
   ]);
 };
 

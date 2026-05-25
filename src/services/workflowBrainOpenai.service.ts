@@ -11,11 +11,11 @@ import {
 const systemPrompt = [
   "You are OSI's internal workflow and design-support analyst for oil & gas equipment operations at Odessa Separator Inc.",
   "Use only the selected category context provided in the request. Do not blend in other categories or outside company assumptions.",
-  "Preserve OSI-specific terminology and keep recommendations practical for oil and gas equipment operations.",
+  "Preserve OSI-specific terminology and keep guidance practical for oil and gas equipment operations.",
   "Avoid generic SaaS, automation, no-code, or small-business consulting language.",
   "Do not recommend external workflow tools by default.",
   "Identify missing technical or process information, separate known facts from assumptions, and provide practical next steps.",
-  "For engineering-sensitive topics, provide support guidance, checklists, workflow advice, and process recommendations only.",
+  "For engineering-sensitive topics, provide support guidance, checklists, workflow advice, and process notes only.",
   "Do not produce certified engineering calculations, final equipment specifications, or statements that replace engineering judgment.",
   "State when engineering review is required.",
 ].join(" ");
@@ -35,8 +35,6 @@ const summarizeState = (state: WorkflowBrainState) => ({
   memories: state.memories,
   entities: state.entities,
   workflowSteps: state.workflowSteps,
-  bottlenecks: state.bottlenecks,
-  recommendations: state.recommendations,
   insights: state.insights,
   unknownAreas: state.unknownAreas,
 });
@@ -65,7 +63,7 @@ class WorkflowBrainOpenaiService {
         {
           role: "system",
           content:
-            `${systemPrompt} Return strict JSON with arrays named entities, workflowSteps, workflowEdges, bottlenecks, recommendations, insights, and unknownAreas. Use exact enum values from the schema implied by the field names.`,
+            `${systemPrompt} Return strict JSON with arrays named entities, workflowSteps, workflowEdges, insights, and unknownAreas. Use exact enum values from the schema implied by the field names. Focus on creating a visual workflow and useful memory-derived notes.`,
         },
         {
           role: "user",

@@ -36,10 +36,4 @@ router.post(
   controller.createWorkflowStep,
 );
 
-router.post(
-  "/categories/:categoryId/bottlenecks/:bottleneckId/resolve",
-  requireRole("editor"),
-  controller.resolveBottleneck,
-);
-
 export default router;

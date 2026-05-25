@@ -49,3 +49,10 @@ export const appendConversationTurns = async (
     { upsert: true },
   );
 };
+
+export const clearConversationHistory = async (
+  userId: string,
+  sessionId: string,
+): Promise<void> => {
+  await Conversation.deleteOne({ userId, sessionId });
+};

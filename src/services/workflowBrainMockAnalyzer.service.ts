@@ -3,122 +3,126 @@ import { WorkflowBrainState } from "./workflowBrainState.service";
 
 const severityValues = ["low", "medium", "high"] as const;
 
+const entitySchema = z.union([
+  z.object({
+    name: z.string().min(1),
+    type: z.enum([
+      "equipment",
+      "component",
+      "process",
+      "role",
+      "department",
+      "customer",
+      "well",
+      "specification",
+      "document",
+      "tool",
+      "risk",
+      "material",
+      "measurement",
+      "other",
+    ]),
+    description: z.string().default(""),
+  }),
+  z.string().min(1).transform((name) => ({
+    name,
+    type: "other" as const,
+    description: name,
+  })),
+]);
+
+const workflowStepSchema = z.union([
+  z.object({
+    name: z.string().min(1),
+    description: z.string().default(""),
+    ownerEntityName: z.string().optional(),
+    relatedEntityNames: z.array(z.string()).default([]),
+    position: z.number().int().nonnegative().default(0),
+    status: z.enum(["active", "unclear", "risky", "optimized"]).default("active"),
+  }),
+  z.string().min(1).transform((name) => ({
+    name,
+    description: name,
+    ownerEntityName: undefined,
+    relatedEntityNames: [],
+    position: 0,
+    status: "active" as const,
+  })),
+]);
+
+const workflowEdgeSchema = z.union([
+  z.object({
+    fromStepName: z.string().min(1),
+    toStepName: z.string().min(1),
+    label: z.string().default(""),
+  }),
+  z.string().min(1).transform((label) => ({
+    fromStepName: "",
+    toStepName: "",
+    label,
+  })),
+]);
+
+const insightSchema = z.union([
+  z.object({
+    type: z.enum([
+      "missing_information",
+      "design_dependency",
+      "human_dependency",
+      "process_risk",
+      "document_gap",
+      "handoff_risk",
+      "qa_risk",
+      "operational_risk",
+    ]),
+    title: z.string().min(1),
+    description: z.string().default(""),
+    severity: z.enum(severityValues).default("medium"),
+    confidence: z.number().min(0).max(1).default(0.75),
+    relatedWorkflowStepNames: z.array(z.string()).default([]),
+    relatedEntityNames: z.array(z.string()).default([]),
+  }),
+  z.string().min(1).transform((title) => ({
+    type: "operational_risk" as const,
+    title,
+    description: title,
+    severity: "medium" as const,
+    confidence: 0.6,
+    relatedWorkflowStepNames: [],
+    relatedEntityNames: [],
+  })),
+]);
+
+const unknownAreaSchema = z.union([
+  z.object({
+    title: z.string().min(1),
+    description: z.string().default(""),
+    severity: z.enum(severityValues).default("medium"),
+    suggestedQuestion: z.string().default(""),
+  }),
+  z.string().min(1).transform((title) => ({
+    title,
+    description: title,
+    severity: "medium" as const,
+    suggestedQuestion: `What should OSI add to this category memory about: ${title}?`,
+  })),
+]);
+
 export const workflowAnalysisSchema = z.object({
   entities: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        type: z.enum([
-          "equipment",
-          "component",
-          "process",
-          "role",
-          "department",
-          "customer",
-          "well",
-          "specification",
-          "document",
-          "tool",
-          "risk",
-          "material",
-          "measurement",
-          "other",
-        ]),
-        description: z.string().default(""),
-      }),
-    )
+    .array(entitySchema)
     .default([]),
   workflowSteps: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        description: z.string().default(""),
-        ownerEntityName: z.string().optional(),
-        relatedEntityNames: z.array(z.string()).default([]),
-        position: z.number().int().nonnegative().default(0),
-        status: z.enum(["active", "unclear", "risky", "optimized"]).default("active"),
-      }),
-    )
+    .array(workflowStepSchema)
     .default([]),
   workflowEdges: z
-    .array(
-      z.object({
-        fromStepName: z.string().min(1),
-        toStepName: z.string().min(1),
-        label: z.string().default(""),
-      }),
-    )
-    .default([]),
-  bottlenecks: z
-    .array(
-      z.object({
-        title: z.string().min(1),
-        description: z.string().default(""),
-        severity: z.enum(severityValues).default("medium"),
-        category: z.enum([
-          "missing_specification",
-          "unclear_owner",
-          "approval_delay",
-          "engineering_handoff",
-          "manual_reentry",
-          "qa_gap",
-          "document_gap",
-          "field_data_gap",
-          "design_risk",
-          "communication_gap",
-          "other",
-        ]),
-        relatedStepNames: z.array(z.string()).default([]),
-      }),
-    )
-    .default([]),
-  recommendations: z
-    .array(
-      z.object({
-        title: z.string().min(1),
-        description: z.string().default(""),
-        recommendationType: z
-          .enum(["operational", "design", "process", "documentation", "review", "hybrid"])
-          .default("process"),
-        estimatedImpact: z.enum(severityValues).default("medium"),
-        difficulty: z.enum(["easy", "medium", "hard"]).default("medium"),
-        requiredInputs: z.array(z.string()).default([]),
-        implementationNotes: z.string().default(""),
-        relatedBottleneckTitles: z.array(z.string()).default([]),
-      }),
-    )
+    .array(workflowEdgeSchema)
     .default([]),
   insights: z
-    .array(
-      z.object({
-        type: z.enum([
-          "missing_information",
-          "design_dependency",
-          "human_dependency",
-          "process_risk",
-          "document_gap",
-          "handoff_risk",
-          "qa_risk",
-          "operational_risk",
-        ]),
-        title: z.string().min(1),
-        description: z.string().default(""),
-        severity: z.enum(severityValues).default("medium"),
-        confidence: z.number().min(0).max(1).default(0.75),
-        relatedWorkflowStepNames: z.array(z.string()).default([]),
-        relatedEntityNames: z.array(z.string()).default([]),
-      }),
-    )
+    .array(insightSchema)
     .default([]),
   unknownAreas: z
-    .array(
-      z.object({
-        title: z.string().min(1),
-        description: z.string().default(""),
-        severity: z.enum(severityValues).default("medium"),
-        suggestedQuestion: z.string().default(""),
-      }),
-    )
+    .array(unknownAreaSchema)
     .default([]),
 });
 
@@ -177,7 +181,7 @@ export const analyzeNoteWithMock = (
     entities.push({
       name: "Engineering",
       type: "department",
-      description: "Technical review owner for design feasibility and equipment recommendations.",
+      description: "Technical review owner for design feasibility and equipment guidance.",
     });
   }
   if (qaContext) {
@@ -220,39 +224,10 @@ export const analyzeNoteWithMock = (
     });
   }
 
-  const bottlenecks: WorkflowAnalysis["bottlenecks"] = [];
-  const recommendations: WorkflowAnalysis["recommendations"] = [];
   const unknownAreas: WorkflowAnalysis["unknownAreas"] = [];
   const insights: WorkflowAnalysis["insights"] = [];
 
   if (missingData) {
-    bottlenecks.push({
-      title: "Missing field data delays engineering review",
-      description:
-        "Engineering receives requests before required operating or field data is complete, creating follow-up work and delay.",
-      severity: "high",
-      category: "field_data_gap",
-      relatedStepNames: ["Sales receives separator request", "Engineering reviews request"],
-    });
-    recommendations.push({
-      title: "Create a separator request intake checklist before engineering handoff",
-      description:
-        "Standardize required design inputs before the request moves from sales or proposals to engineering.",
-      recommendationType: "documentation",
-      estimatedImpact: "high",
-      difficulty: "easy",
-      requiredInputs: [
-        "Flow rate",
-        "Operating pressure",
-        "Temperature",
-        "Gas composition",
-        "Liquid loading",
-        "Expected sand content",
-      ],
-      implementationNotes:
-        "Use the checklist as a handoff gate and document assumptions when customer data is not yet available.",
-      relatedBottleneckTitles: ["Missing field data delays engineering review"],
-    });
     unknownAreas.push({
       title: "Request completeness owner is unclear",
       description:
@@ -271,19 +246,6 @@ export const analyzeNoteWithMock = (
       relatedWorkflowStepNames: ["Sales receives separator request", "Engineering reviews request"],
       relatedEntityNames: ["Sales", "Engineering"],
     });
-  } else {
-    recommendations.push({
-      title: "Document assumptions before review",
-      description:
-        "Capture known facts, assumptions, and missing inputs before routing the work to the next owner.",
-      recommendationType: "process",
-      estimatedImpact: "medium",
-      difficulty: "easy",
-      requiredInputs: [],
-      implementationNotes:
-        "Keep the note tied to the selected OSI category so future workflow guidance remains scoped.",
-      relatedBottleneckTitles: [],
-    });
   }
 
   return workflowAnalysisSchema.parse({
@@ -299,8 +261,6 @@ export const analyzeNoteWithMock = (
             },
           ]
         : [],
-    bottlenecks,
-    recommendations,
     insights,
     unknownAreas,
   });
@@ -344,7 +304,7 @@ export const createDesignWithMock = (
     ],
     risks: [
       "Incomplete field data can delay review or produce incorrect preliminary assumptions.",
-      "Final equipment recommendations require qualified engineering review.",
+      "Final equipment guidance requires qualified engineering review.",
     ],
     recommendedNextSteps: [
       "Assign request completeness ownership before engineering review.",

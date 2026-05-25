@@ -204,87 +204,6 @@ workflowEdgeSchema.index(
   { unique: true },
 );
 
-export interface IBrainBottleneck extends Document {
-  categoryId: mongoose.Types.ObjectId;
-  title: string;
-  description: string;
-  severity: BrainSeverity;
-  category: string;
-  relatedStepIds: mongoose.Types.ObjectId[];
-  sourceMemoryIds: mongoose.Types.ObjectId[];
-  status: "open" | "improved" | "resolved";
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const bottleneckSchema = new Schema<IBrainBottleneck>(
-  {
-    categoryId: { type: objectId, ref: "WorkflowBrainCategory", required: true, index: true },
-    title: { type: String, required: true, trim: true, maxlength: 180 },
-    description: { type: String, default: "", trim: true, maxlength: 2000 },
-    severity: { type: String, enum: ["low", "medium", "high"], default: "medium" },
-    category: {
-      type: String,
-      enum: [
-        "missing_specification",
-        "unclear_owner",
-        "approval_delay",
-        "engineering_handoff",
-        "manual_reentry",
-        "qa_gap",
-        "document_gap",
-        "field_data_gap",
-        "design_risk",
-        "communication_gap",
-        "other",
-      ],
-      default: "other",
-      index: true,
-    },
-    relatedStepIds: [{ type: objectId, ref: "BrainWorkflowStep" }],
-    sourceMemoryIds: [{ type: objectId, ref: "BrainMemory" }],
-    status: { type: String, enum: ["open", "improved", "resolved"], default: "open", index: true },
-  },
-  { timestamps: true },
-);
-
-bottleneckSchema.index({ categoryId: 1, title: 1 }, { unique: true });
-
-export interface IBrainRecommendation extends Document {
-  categoryId: mongoose.Types.ObjectId;
-  title: string;
-  description: string;
-  recommendationType: string;
-  estimatedImpact: BrainSeverity;
-  difficulty: "easy" | "medium" | "hard";
-  requiredInputs: string[];
-  implementationNotes: string;
-  relatedBottleneckIds: mongoose.Types.ObjectId[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const recommendationSchema = new Schema<IBrainRecommendation>(
-  {
-    categoryId: { type: objectId, ref: "WorkflowBrainCategory", required: true, index: true },
-    title: { type: String, required: true, trim: true, maxlength: 180 },
-    description: { type: String, default: "", trim: true, maxlength: 2500 },
-    recommendationType: {
-      type: String,
-      enum: ["operational", "design", "process", "documentation", "review", "hybrid"],
-      default: "process",
-    },
-    estimatedImpact: { type: String, enum: ["low", "medium", "high"], default: "medium" },
-    difficulty: { type: String, enum: ["easy", "medium", "hard"], default: "medium" },
-    requiredInputs: [{ type: String, trim: true, maxlength: 240 }],
-    implementationNotes: { type: String, default: "", trim: true, maxlength: 2500 },
-    relatedBottleneckIds: [{ type: objectId, ref: "BrainBottleneck" }],
-  },
-  { timestamps: true },
-);
-
-recommendationSchema.index({ categoryId: 1, title: 1 }, { unique: true });
-
 export interface IBrainInsight extends Document {
   categoryId: mongoose.Types.ObjectId;
   type: string;
@@ -400,8 +319,6 @@ const stripVersion = {
   entitySchema,
   workflowStepSchema,
   workflowEdgeSchema,
-  bottleneckSchema,
-  recommendationSchema,
   insightSchema,
   unknownAreaSchema,
   designOutputSchema,
@@ -420,14 +337,6 @@ export const BrainWorkflowStep = mongoose.model<IBrainWorkflowStep>(
 export const BrainWorkflowEdge = mongoose.model<IBrainWorkflowEdge>(
   "BrainWorkflowEdge",
   workflowEdgeSchema,
-);
-export const BrainBottleneck = mongoose.model<IBrainBottleneck>(
-  "BrainBottleneck",
-  bottleneckSchema,
-);
-export const BrainRecommendation = mongoose.model<IBrainRecommendation>(
-  "BrainRecommendation",
-  recommendationSchema,
 );
 export const BrainInsight = mongoose.model<IBrainInsight>("BrainInsight", insightSchema);
 export const BrainUnknownArea = mongoose.model<IBrainUnknownArea>(

@@ -228,19 +228,3 @@ export const createWorkflowStep = async (req: Request, res: Response) => {
     handleError(res, error, "Failed to create workflow step");
   }
 };
-
-export const resolveBottleneck = async (req: Request, res: Response) => {
-  try {
-    const bottleneck = await analysisService.resolveBottleneck(
-      req.params.categoryId,
-      req.params.bottleneckId,
-    );
-    if (!bottleneck) {
-      res.status(404).json({ error: "Bottleneck not found" });
-      return;
-    }
-    res.json(bottleneck);
-  } catch (error) {
-    handleError(res, error, "Failed to resolve bottleneck");
-  }
-};

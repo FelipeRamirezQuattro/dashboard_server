@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { Request, Response, NextFunction } from "express";
 import {
+  clearHistory,
   getHistory,
   searchDocuments,
   sendMessage,
@@ -33,6 +34,7 @@ const authenticateToolOrUser = (
 // POST /api/chatbot/message - Send a message to the chatbot
 router.post("/message", authenticate, sendMessage);
 router.get("/history", authenticate, getHistory);
+router.delete("/history", authenticate, clearHistory);
 router.post("/tools/document-search", authenticateToolOrUser, searchDocuments);
 
 export default router;
