@@ -72,7 +72,7 @@ class ChatbotOrchestrator {
       const response = await this.routeMessage(message, {
         ...request,
         sessionId,
-        context: { history },
+        context: { ...(request.context || {}), history },
       });
 
       if (request.userId && request.userId !== "anonymous") {
@@ -114,6 +114,11 @@ class ChatbotOrchestrator {
     const explicitTarget = request.context?.target;
     if (explicitTarget && explicitTarget.type !== "auto") {
       return this.routeExplicitTarget(message, request);
+    }
+
+    if (env.enableN8nChatbot) {
+      const response = await n8nWebhookProvider.getResponse(message, request);
+      return { ...response, source: "n8n", routedTo: "n8n" };
     }
 
     if (documentSearchService.isDocumentRequest(message)) {
@@ -187,11 +192,6 @@ class ChatbotOrchestrator {
 
     if (aiDecision.route === "general") {
       return this.generalAnswer(message, request.context?.history || []);
-    }
-
-    if (env.enableN8nChatbot) {
-      const response = await n8nWebhookProvider.getResponse(message, request);
-      return { ...response, source: "n8n", routedTo: "n8n" };
     }
 
     return this.clarifyResponse();

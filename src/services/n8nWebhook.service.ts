@@ -10,7 +10,13 @@ import { env } from "../config/env";
  * response back to the standard ChatResponse shape expected by the controller.
  *
  * Payload sent to n8n:
- *   { session_id: <user email>, message: <text> }
+ *   {
+ *     session_id: <user email>,
+ *     message: <text>,
+ *     selected_source: "auto" | "workflow_brain" | "external_app" | "file_bank",
+ *     target: <selected source details>,
+ *     context: <chat context>
+ *   }
  *
  * Response received from n8n:
  *   {
@@ -32,6 +38,8 @@ export class N8nWebhookProvider implements ChatProvider {
     request?: ChatRequest,
   ): Promise<ChatResponse> {
     const userEmail = request?.userEmail;
+    const target = request?.context?.target || request?.target || { type: "auto" };
+    const selectedSource = target.type || "auto";
 
     if (!userEmail) {
       logger.warn("N8nWebhookProvider: no userEmail on request, falling back");
@@ -43,11 +51,30 @@ export class N8nWebhookProvider implements ChatProvider {
     }
 
     try {
-      logger.info(`N8nWebhookProvider: sending message to n8n for ${userEmail}`);
+      logger.info(
+        `N8nWebhookProvider: sending message to n8n for ${userEmail} selected_source=${selectedSource}`,
+      );
 
       const { data } = await axios.post(
         this.webhookUrl,
-        { session_id: userEmail, message },
+        {
+          session_id: userEmail,
+          message,
+          selected_source: selectedSource,
+          selected_app:
+            target.type === "external_app" ? target.appName : undefined,
+          workflow_brain_category_id:
+            target.type === "workflow_brain"
+              ? target.workflowBrainCategoryId
+              : request?.workflowBrainCategoryId,
+          document_source:
+            target.type === "file_bank" ? target.documentSource : undefined,
+          target,
+          context: request?.context,
+          user_id: request?.userId,
+          user_email: userEmail,
+          session_id_raw: request?.sessionId,
+        },
         { timeout: 30_000 },
       );
 
