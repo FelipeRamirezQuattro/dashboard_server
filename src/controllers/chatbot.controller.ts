@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { chatbotOrchestrator } from "../services/chatbotOrchestrator.service";
+import { appRouterService } from "../services/appRouter.service";
 import { documentSearchService } from "../services/documentSearch.service";
+import { oneDriveService } from "../services/oneDrive.service";
 import { workflowBrainChatService } from "../services/workflowBrainChat.service";
 import logger from "../utils/logger";
 
@@ -66,6 +68,78 @@ export const sendMessage = async (req: Request, res: Response) => {
         sessionId: effectiveSessionId,
         source: "workflow_brain",
         routedTo: brainResponse.categoryName,
+      });
+    }
+
+    if (normalizedContext.target?.type === "external_app") {
+      const appName = normalizedContext.target.appName;
+
+      if (!appName) {
+        return res.status(200).json({
+          reply: "Select an external application before asking this question.",
+          timestamp: new Date(),
+          confidence: 0.4,
+          sessionId: effectiveSessionId,
+          source: "app",
+          routedTo: "external_app",
+        });
+      }
+
+      const appResponse = await appRouterService.queryApp(
+        appName,
+        message,
+        userId,
+        normalizedContext,
+        effectiveSessionId,
+      );
+
+      return res.status(200).json({
+        reply: appResponse.reply,
+        timestamp: new Date(appResponse.timestamp || Date.now()),
+        confidence: appResponse.success ? appResponse.confidence || 0.9 : 0,
+        sessionId: effectiveSessionId,
+        source: appResponse.success ? "app" : "error",
+        routedTo: appName,
+      });
+    }
+
+    if (normalizedContext.target?.type === "file_bank") {
+      const selectedSource =
+        normalizedContext.target.documentSource === "local" ||
+        normalizedContext.target.documentSource === "onedrive"
+          ? normalizedContext.target.documentSource
+          : undefined;
+
+      if (!selectedSource || selectedSource === "onedrive") {
+        await oneDriveService.search(message);
+      }
+
+      const docs = await documentSearchService.search(message, 5, selectedSource);
+      const fileResponse = documentSearchService.toChatResponse(docs);
+      if (fileResponse) {
+        return res.status(200).json({
+          reply: fileResponse.reply,
+          timestamp: fileResponse.timestamp,
+          confidence: fileResponse.confidence,
+          sessionId: effectiveSessionId,
+          source: fileResponse.source,
+          routedTo: fileResponse.routedTo,
+          documents: fileResponse.documents,
+        });
+      }
+
+      return res.status(200).json({
+        reply:
+          selectedSource === "onedrive"
+            ? "I couldn't find that in the indexed OneDrive folder."
+            : selectedSource === "local"
+              ? "I couldn't find that in the local File Bank."
+              : "I couldn't find that in the File Bank or OneDrive index.",
+        timestamp: new Date(),
+        confidence: 0.35,
+        sessionId: effectiveSessionId,
+        source: "file_bank",
+        routedTo: selectedSource || "documents",
       });
     }
 
