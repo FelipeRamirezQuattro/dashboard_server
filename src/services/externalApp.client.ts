@@ -146,7 +146,11 @@ class ExternalAppClient {
         success: false,
         error: {
           code: "EXTERNAL_APP_ERROR",
-          message: data.message || error.response.statusText || "Unknown error",
+          message:
+            data?.message ||
+            data?.error?.message ||
+            error.response.statusText ||
+            "Unknown error",
         },
       };
     }
@@ -159,7 +163,7 @@ class ExternalAppClient {
       success: false,
       error: {
         code: "NETWORK_ERROR",
-        message: "Failed to connect to external application",
+        message: error?.message || "Failed to connect to external application",
       },
     };
   }

@@ -66,6 +66,34 @@ class AppRouterService {
     return normalized;
   }
 
+  private resolveChatbotTarget(
+    rawUrl: string,
+    appName: string,
+  ): { baseUrl: string; endpoint: string; mode: "base" | "full" } {
+    const normalizedUrl = this.normalizeChatbotBaseUrl(rawUrl);
+
+    try {
+      const parsed = new URL(normalizedUrl);
+      const path = parsed.pathname.toLowerCase();
+      const isFullEndpoint =
+        path.endsWith("/chatbot/query") ||
+        path.includes("/webhook/") ||
+        path.includes("/webhook-test/");
+
+      if (isFullEndpoint) {
+        return { baseUrl: normalizedUrl, endpoint: "", mode: "full" };
+      }
+    } catch {
+      // Fall through to legacy base URL behavior.
+    }
+
+    return {
+      baseUrl: normalizedUrl,
+      endpoint: this.getChatbotEndpoint(appName),
+      mode: "base",
+    };
+  }
+
   private getAppNameCandidates(appName: string): string[] {
     const aliases: Record<string, string[]> = {
       "OSI Pump Pro": ["OSI Pump Pro", "Pump Tracker", "OSI Pump Tracker"],
@@ -152,24 +180,24 @@ class AppRouterService {
         };
       }
 
-      const chatbotBaseUrl = this.normalizeChatbotBaseUrl(app.chatbotApiUrl);
+      const chatbotTarget = this.resolveChatbotTarget(app.chatbotApiUrl, appName);
       const appApiKey = this.getAppApiKey(appName);
 
       logger.info(
-        `[${appName}] Connecting → baseUrl: "${chatbotBaseUrl}", endpoint: "${this.getChatbotEndpoint(appName)}", apiKey: ${appApiKey ? "present (" + appApiKey.substring(0, 8) + "...)" : "MISSING"}`,
+        `[${appName}] Connecting → mode: "${chatbotTarget.mode}", baseUrl: "${chatbotTarget.baseUrl}", endpoint: "${chatbotTarget.endpoint || "(full URL)"}", apiKey: ${appApiKey ? "present (" + appApiKey.substring(0, 8) + "...)" : "MISSING"}`,
       );
 
       // Create client for this app
       const client = ExternalAppClientFactory.getClient(
         appName,
-        chatbotBaseUrl,
+        chatbotTarget.baseUrl,
         appApiKey,
         env.chatbotConnectorTimeoutMs,
       );
 
       // Send query to app's chatbot endpoint
       logger.info(
-        `Routing query to ${appName}: "${message.substring(0, 50)}..." (base: ${chatbotBaseUrl})`,
+        `Routing query to ${appName}: "${message.substring(0, 50)}..." (${chatbotTarget.mode}: ${chatbotTarget.baseUrl}${chatbotTarget.endpoint})`,
       );
 
       const request: ChatbotQueryRequest = {
@@ -179,13 +207,16 @@ class AppRouterService {
         context,
       };
 
-      // Get the chatbot endpoint for this specific app
-      const chatbotEndpoint = this.getChatbotEndpoint(appName);
-
-      let response = await client.post<ChatbotQueryResponse>(chatbotEndpoint, request);
+      let response = await client.post<ChatbotQueryResponse>(
+        chatbotTarget.endpoint,
+        request,
+      );
       if (!response.success && response.error?.code === "NETWORK_ERROR") {
         logger.warn(`${appName} network error; retrying once`);
-        response = await client.post<ChatbotQueryResponse>(chatbotEndpoint, request);
+        response = await client.post<ChatbotQueryResponse>(
+          chatbotTarget.endpoint,
+          request,
+        );
       }
 
       // Support two response shapes from external apps:
@@ -212,12 +243,23 @@ class AppRouterService {
         return directResponse;
       }
 
-      logger.error(`${appName} returned error:`, wrappedResponse.error);
+      const errorCode =
+        wrappedResponse.error?.code || directResponse.error?.code || "UNKNOWN_ERROR";
+      const errorMessage =
+        wrappedResponse.error?.message ||
+        directResponse.error?.message ||
+        "No error details returned by the configured chatbot endpoint.";
+      logger.error(
+        `${appName} returned error from ${chatbotTarget.mode} endpoint ${chatbotTarget.baseUrl}${chatbotTarget.endpoint}: ${errorCode} - ${errorMessage}`,
+      );
       return {
         success: false,
-        reply: `${appName} encountered an error processing your request.`,
+        reply: `${appName} could not answer through its configured chatbot endpoint. Connector error: ${errorCode}. ${errorMessage}`,
         timestamp: new Date().toISOString(),
-        error: wrappedResponse.error,
+        error: {
+          code: errorCode,
+          message: errorMessage,
+        },
       };
     } catch (error: any) {
       logger.error(`Error querying ${appName} after ${Date.now() - startedAt}ms:`, error);
