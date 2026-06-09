@@ -5,8 +5,14 @@ import User from "../models/User.model";
 import logger from "../utils/logger";
 
 // Determine user role based on email
-const determineUserRole = (email: string): "admin" | "editor" | "viewer" => {
+const determineUserRole = (
+  email: string,
+): "superadmin" | "admin" | "editor" | "viewer" => {
   const normalizedEmail = email.toLowerCase().trim();
+
+  if (env.ssoSuperAdminEmails.includes(normalizedEmail)) {
+    return "superadmin";
+  }
 
   if (env.ssoAdminEmails.includes(normalizedEmail)) {
     return "admin";

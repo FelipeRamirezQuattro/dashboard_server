@@ -17,6 +17,7 @@ interface EnvConfig {
   azureTenantId: string;
   azureRedirectUri: string;
   encryptionKey: string;
+  ssoSuperAdminEmails: string[];
   ssoAdminEmails: string[];
   ssoEditorEmails: string[];
   // AI Chatbot Configuration (Optional)
@@ -88,6 +89,11 @@ export const env: EnvConfig = {
     process.env.AZURE_REDIRECT_URI ||
     "http://localhost:4000/api-dashboard/auth/sso/microsoft/callback",
   encryptionKey: process.env.ENCRYPTION_KEY || "",
+  ssoSuperAdminEmails: process.env.SSO_SUPERADMIN_EMAILS
+    ? process.env.SSO_SUPERADMIN_EMAILS.split(",").map((email) =>
+        email.trim().toLowerCase(),
+      )
+    : [],
   ssoAdminEmails: process.env.SSO_ADMIN_EMAILS
     ? process.env.SSO_ADMIN_EMAILS.split(",").map((email) =>
         email.trim().toLowerCase(),
