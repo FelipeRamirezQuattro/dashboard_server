@@ -34,7 +34,8 @@ export const parseCsvWithLines = (text: string): ParsedCsv => {
   }
   let records: RecordWithInfo[];
   try {
-    records = parse(text, {
+    // csv-parse miscounts lines for CRLF files; normalize so line tracking is exact.
+    records = parse(text.replace(/\r\n/g, "\n"), {
       bom: true,
       skip_empty_lines: true,
       relax_column_count: false,

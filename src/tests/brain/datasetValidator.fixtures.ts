@@ -227,6 +227,39 @@ test("row numbers are 1-based file lines across blank and multiline rows", () =>
   assert(issue && issue.row === 5, `expected row 5, got ${issue && issue.row}`);
 });
 
+test("mixed-case header accepted", () => {
+  const r = run("ID,Note\np1,hi\n");
+  assert(r.canCommit && r.rows.parents[0].id === "p1", JSON.stringify(r.issues));
+});
+
+test("padded header accepted", () => {
+  const r = run(" id , note \np1,hi\n");
+  assert(r.canCommit, JSON.stringify(r.issues));
+});
+
+test("id,ID is DUPLICATE_HEADER", () => {
+  const r = run("id,ID\np1,p1\n");
+  assert(hasReject(r, "DUPLICATE_HEADER"), JSON.stringify(r.issues));
+});
+
+test("CRLF multiline cell row numbers", () => {
+  const r = run('id,note\r\np1,"a\r\nb"\r\n\r\np1,c\r\n');
+  const issue = r.issues.find((i) => i.code === "DUPLICATE_KEY");
+  assert(issue && issue.row === 5, `expected row 5, got ${issue && issue.row}`);
+  assert(r.rows.parents[0].note === "a\nb", "cell content");
+});
+
+test("exactly 20,000 rows accepted", () => {
+  const text = "id\n" + Array.from({ length: 20000 }, (_, i) => `r${i}`).join("\n");
+  assert(parseCsv(text).rows.length === 20000, "20,000 rows parse");
+});
+
+test("- and null rejected in integer column", () => {
+  for (const tok of ["-", "null"]) {
+    assert(hasReject(run(P, `${CH}\np1,a,,${tok},,,,,\n`), "NULL_TOKEN"), tok);
+  }
+});
+
 let failed = 0;
 for (const c of cases) {
   try {

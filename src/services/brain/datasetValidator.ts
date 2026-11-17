@@ -115,15 +115,15 @@ const validateTable = (table: TableDef, text: string, issues: RowIssue[]): Table
   }
   state.rowsRead = parsed.rows.length;
 
-  const header = parsed.header.map((h) => h.trim());
+  const header = parsed.header.map((h) => h.trim().toLowerCase());
   const seen = new Set<string>();
   for (const h of header) {
     if (seen.has(h)) fileIssue("DUPLICATE_HEADER", `Duplicate column "${h}"`, h);
     seen.add(h);
   }
-  const known = new Map(table.columns.map((c) => [c.name, c]));
+  const known = new Map(table.columns.map((c) => [c.name.toLowerCase(), c]));
   for (const col of table.columns) {
-    if (col.required && !seen.has(col.name)) fileIssue("MISSING_COLUMN", `Required column "${col.name}" is missing`, col.name);
+    if (col.required && !seen.has(col.name.toLowerCase())) fileIssue("MISSING_COLUMN", `Required column "${col.name}" is missing`, col.name);
   }
   for (const h of header) {
     if (!known.has(h)) fileIssue("UNKNOWN_COLUMN", `Unknown column "${h}"`, h);
@@ -144,12 +144,12 @@ const validateTable = (table: TableDef, text: string, issues: RowIssue[]): Table
       const col = known.get(name) as ColumnDef;
       const raw = (cells[ci] ?? "").trim();
       if (raw === "") {
-        if (col.required) reject(name, "REQUIRED", `${name} is required`);
+        if (col.required) reject(col.name, "REQUIRED", `${col.name} is required`);
         return;
       }
       const result = coerce(col, raw);
-      if (result.ok) row[name] = result.value;
-      else reject(name, result.code, result.message);
+      if (result.ok) row[col.name] = result.value;
+      else reject(col.name, result.code, result.message);
     });
     if (rowOk && table.primaryKey.length > 0 && table.primaryKey.every((k) => row[k] !== undefined)) {
       const key = JSON.stringify(table.primaryKey.map((k) => row[k]));
