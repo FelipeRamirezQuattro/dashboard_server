@@ -172,7 +172,7 @@ class WorkflowBrainChatService {
       };
     }
     logger.info(
-      `[WorkflowBrainDebug][brain:start] categoryId=${categoryId} categoryName="${categoryName}" memoryCount=${state.memories.length} workflowStepCount=${state.workflowSteps.length} question="${question.slice(0, 160)}"`,
+      `[WorkflowBrainDebug][brain:start] categoryId=${categoryId} categoryName="${categoryName}" memoryCount=${state.memories.length} workflowStepCount=${state.workflowSteps.length}`,
     );
     const directMemoryAnswer = answerDirectMemoryQuestion(
       question,

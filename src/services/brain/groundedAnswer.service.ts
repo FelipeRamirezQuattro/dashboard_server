@@ -141,7 +141,7 @@ export const callAnswerModel = async (prompt: { system: string; user: string }):
   const res = await openai.chat.completions.create({
     model: env.brainAnswerModel,
     temperature: 0,
-    max_tokens: 900,
+    max_tokens: 1200,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: prompt.system },
@@ -151,14 +151,26 @@ export const callAnswerModel = async (prompt: { system: string; user: string }):
   return res.choices[0]?.message?.content ?? "";
 };
 
+export const RETRIEVAL_UNAVAILABLE_LINE = "Stored records could not be searched: the answer service is not configured.";
+
+/** The no-model reply: same first sentence, but it never claims a search ran ("Searched: 0 stored records"). */
+export const withoutSearchClaim = (result: GroundedResult): GroundedResult => ({
+  ...result,
+  reply: result.reply
+    .split("\n")
+    .map((line) => (/^Searched: \d+ stored records\.$/.test(line) ? RETRIEVAL_UNAVAILABLE_LINE : line))
+    .join("\n"),
+});
+
 /** Strict answering with the real ports (DB retrieval + OpenAI). */
-export const answerGrounded = (p: GroundedInput): Promise<GroundedResult> => {
+export const answerGrounded = async (p: GroundedInput): Promise<GroundedResult> => {
   if (!env.openaiApiKey) {
     // no model: never an ungrounded fallback, and no point retrieving
-    return answerGroundedWith(
+    const result = await answerGroundedWith(
       { retrieve: async () => ({ evidence: [], guidance: [] }), callModel: callAnswerModel },
       p,
     );
+    return withoutSearchClaim(result);
   }
   return answerGroundedWith({ retrieve: (r, q) => retrieveEvidence(r, q), callModel: callAnswerModel }, p);
 };

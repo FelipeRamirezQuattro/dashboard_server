@@ -6,7 +6,9 @@ import { embedInBatches, getEmbeddingProvider } from "./embeddingProvider";
 import { buildChunkEmbeddingText, selectActiveRecords } from "./indexerCore";
 import { buildRecordCards, primaryKeyValueOf } from "./recordCards";
 import type { DatasetDefinition, Evidence } from "./types";
+import { env } from "../../config/env";
 import { keywordRank, rankByCosine, rrfMerge } from "./vector";
+import type { ScoredId } from "./vector";
 
 /*
  * Hybrid retrieval for strict (grounded) Brain answers (contract A6a).
@@ -75,12 +77,16 @@ const dedupeById = (items: Evidence[]): Evidence[] => {
  * Pure selection: dedupe by id, keyword-rank the candidates, fuse with vector ranks (RRF), always keep candidates
  * that belong to a named key (or are listed in namedIds), drop candidates with neither keyword overlap nor a vector
  * rank, never return guidance, cap at limit (named first). Each item's score is its fused RRF score.
+ * Relevance floor (A6a.3): scored vector hits below minScore are removed BEFORE fusion, so a candidate found by vectors
+ * alone below the floor is dropped; candidates with a keyword hit or a named key stay. Plain string vector ranks are
+ * unscored and always pass. minScore defaults to env.brainMinScore (BRAIN_MIN_SCORE, provisional 0.30).
  */
 export function selectEvidence(p: {
   question: string;
   candidates: Evidence[];
-  vectorRanks?: string[];
+  vectorRanks?: (string | ScoredId)[];
   namedKeys: string[];
+  minScore?: number;
   /** Ids that belong to a named key through a card (e.g. component rows of a named case). */
   namedIds?: string[];
   limit?: number;
@@ -94,7 +100,11 @@ export function selectEvidence(p: {
     p.question,
   );
   const keyword = keywordRank(keywordQuestion, candidates.map((e) => ({ id: e.id, text: `${e.label}\n${e.text}` })));
-  const vector = (p.vectorRanks ?? []).filter((id) => byId.has(id));
+  const minScore = p.minScore ?? env.brainMinScore;
+  const vector = (p.vectorRanks ?? [])
+    .filter((v) => typeof v === "string" || (Number.isFinite(v.score) && v.score >= minScore))
+    .map((v) => (typeof v === "string" ? v : v.id))
+    .filter((id) => byId.has(id));
   const fused = rrfMerge(vector.length ? [keyword, vector] : [keyword]);
   const score = new Map(fused.map((s) => [s.id, s.score]));
   const namedIdSet = new Set(p.namedIds ?? []);
@@ -306,7 +316,7 @@ export function findUnknownKeyLikeTokens(question: string, keys: string[]): stri
  * (DEMO-999) and names no stored key, nothing is returned, so the answer is "not enough stored information".
  */
 export async function retrieveEvidence(
-  p: { categoryId: string },
+  p: { categoryId: string; minScore?: number },
   question: string,
   ports: RetrievalPorts = defaultRetrievalPorts,
 ): Promise<{ evidence: Evidence[]; guidance: string[]; searched: number }> {
@@ -357,7 +367,7 @@ export async function retrieveEvidence(
   }
 
   const vectorRanks = await rankByVectors(question, ports, chunks, rootVectors, cardRows);
-  const evidence = selectEvidence({ question, candidates, vectorRanks, namedKeys, namedIds });
+  const evidence = selectEvidence({ question, candidates, vectorRanks, namedKeys, namedIds, minScore: p.minScore });
   return { evidence, guidance: chunkSet.guidance, searched };
 }
 
@@ -367,14 +377,17 @@ const groupRows = (records: { table: string; data: Row }[]): Record<string, Row[
   return rows;
 };
 
-/** Vector ranking over current-model vectors only (cap MAX_VECTORS_PER_CATEGORY, most recent kept). */
+/**
+ * Vector ranking over current-model vectors only (cap MAX_VECTORS_PER_CATEGORY, most recent kept). Returns the best
+ * cosine score per evidence id, best first; a card hit gives its score to each of its rows.
+ */
 async function rankByVectors(
   question: string,
   ports: RetrievalPorts,
   chunks: ChunkLite[],
   roots: { key: string; record: RecordLite }[],
   cardRows: Map<string, string[]>,
-): Promise<string[] | undefined> {
+): Promise<ScoredId[] | undefined> {
   try {
     const identity = ports.embeddingIdentity();
     if (!identity) return undefined;
@@ -394,12 +407,16 @@ async function rankByVectors(
     const query = await ports.embedQuestion(question);
     if (!validVector(query)) return undefined;
     const ranked = rankByCosine(query, capped, VECTOR_TOP_K);
-    const out: string[] = [];
+    const best = new Map<string, number>();
+    const add = (id: string, score: number): void => {
+      if (!best.has(id) || score > best.get(id)!) best.set(id, score);
+    };
     for (const r of ranked) {
-      if (r.id.startsWith("card:")) out.push(...(cardRows.get(r.id.slice(5)) ?? []));
-      else out.push(r.id);
+      if (r.id.startsWith("card:")) for (const id of cardRows.get(r.id.slice(5)) ?? []) add(id, r.score);
+      else add(r.id, r.score);
     }
-    return out;
+    // stable: insertion order already follows the cosine ranking; re-sort by score for ties across cards/rows
+    return Array.from(best, ([id, score]) => ({ id, score })).sort((a, b) => b.score - a.score);
   } catch {
     return undefined; // keyword-only; never log content
   }

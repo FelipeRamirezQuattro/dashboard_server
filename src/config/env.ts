@@ -26,6 +26,8 @@ interface EnvConfig {
   brainEmbeddingModel: string;
   brainEmbeddingVersion: string;
   brainAnswerModel: string;
+  /** Retrieval floor for vector-only hits (cosine, 0-1). Provisional default 0.30, tuned on the Task 19 set. */
+  brainMinScore: number;
   anthropicApiKey?: string;
   enableAiFallback: boolean;
   // External app chatbot service-to-service API keys (Optional)
@@ -52,6 +54,13 @@ interface EnvConfig {
   awsSecretAccessKey?: string;
   awsS3Endpoint?: string;
 }
+
+/** BRAIN_MIN_SCORE: a number clamped to 0-1; missing or invalid => 0.30 (provisional, tuned on the Task 19 set). */
+export const parseMinScore = (raw: string | undefined): number => {
+  const value = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  if (!Number.isFinite(value)) return 0.3;
+  return Math.min(1, Math.max(0, value));
+};
 
 const requiredEnvVars = [
   "MONGODB_URI",
@@ -117,6 +126,7 @@ export const env: EnvConfig = {
     process.env.BRAIN_ANSWER_MODEL ||
     process.env.OPENAI_MODEL ||
     "gpt-4o-mini",
+  brainMinScore: parseMinScore(process.env.BRAIN_MIN_SCORE),
   enableAiFallback:
     process.env.ENABLE_AI_FALLBACK?.toLowerCase() === "true" || false,
   // External app chatbot service-to-service API keys (Optional)

@@ -1,5 +1,6 @@
 /// <reference types="node" />
 // Pure / fake-port fixtures for hybrid retrieval. No database, no network.
+import { parseMinScore } from "../../config/env";
 import { rodPumpFailureDefinition } from "../../services/brain/definitions/rodPumpFailure";
 import {
   buildChunkCandidates,
@@ -166,6 +167,34 @@ const main = async (): Promise<void> => {
   ok("retrieve: embedding failure falls back to keywords", fRes.evidence.some((e) => e.id === `${P}solids/DEMO-002|hydrocarbon_paraffin`));
   const none = await retrieveEvidence({ categoryId: "c1" }, "paraffin solids", fakePorts({ records: withVec, identity: null }));
   expect("retrieve: no provider => keyword-only", none.evidence.map((e) => e.id), fRes.evidence.map((e) => e.id));
+
+  // ---- relevance floor (A6a.3 minScore): vector-only hits below the floor are dropped before fusion
+  const low = [0.1, 1]; // cosine vs query [1, 0] ~= 0.0995
+  const high = [1, 0.5]; // ~= 0.894
+  const floorRecords = records.map((r) =>
+    r.table !== "cases" ? r : { ...r, embedding: r.primaryKeyValue === "DEMO-002" ? high : low, embeddingModel: "m", embeddingVersion: "1" });
+  const allLow = records.map((r) => (r.table !== "cases" ? r : { ...r, embedding: low, embeddingModel: "m", embeddingVersion: "1" }));
+  const floorPorts = (recs: typeof records) => fakePorts({ records: recs, identity, embed: async () => [1, 0] });
+  const offTopic = "what is the capital of France?";
+  expect("floor: off-topic, all vectors below floor => 0 evidence",
+    (await retrieveEvidence({ categoryId: "c1", minScore: 0.3 }, offTopic, floorPorts(allLow))).evidence.length, 0);
+  ok("floor: minScore 0 keeps vector-only hits (old behavior)",
+    (await retrieveEvidence({ categoryId: "c1", minScore: 0 }, offTopic, floorPorts(allLow))).evidence.length > 0);
+  const above = (await retrieveEvidence({ categoryId: "c1", minScore: 0.3 }, offTopic, floorPorts(floorRecords))).evidence.map((e) => e.id);
+  ok("floor: vector hit above floor with no keyword overlap kept (card rows)", above[0] === `${P}cases/DEMO-002` && above.every((id) => (ds.cardToEvidenceIds.get("DEMO-002") ?? []).includes(id)));
+  const namedLow = (await retrieveEvidence({ categoryId: "c1", minScore: 0.99 }, "capital of DEMO-003", floorPorts(allLow))).evidence.map((e) => e.id);
+  ok("floor: named key kept regardless of score", namedLow.includes(`${P}cases/DEMO-003`));
+  const kwLow = (await retrieveEvidence({ categoryId: "c1", minScore: 0.99 }, "paraffin", floorPorts(allLow))).evidence.map((e) => e.id);
+  ok("floor: keyword hit below floor kept", kwLow.includes(`${P}solids/DEMO-002|hydrocarbon_paraffin`));
+  const scored = selectEvidence({
+    question: "nothing matches", candidates: cands, namedKeys: [], minScore: 0.3,
+    vectorRanks: [{ id: `${P}cases/DEMO-003`, score: 0.29 }, { id: `${P}cases/DEMO-002`, score: 0.31 }, { id: "doc:d1#0", score: NaN }],
+  });
+  expect("floor: selectEvidence drops scored vector-only below floor (and NaN)", scored.map((e) => e.id), [`${P}cases/DEMO-002`]);
+  expect("floor: unscored string ranks always pass",
+    selectEvidence({ question: "nothing", candidates: cands, namedKeys: [], minScore: 1, vectorRanks: [`${P}cases/DEMO-003`] }).map((e) => e.id), [`${P}cases/DEMO-003`]);
+  expect("floor: parseMinScore", [parseMinScore(undefined), parseMinScore(""), parseMinScore("0.5"), parseMinScore("2"), parseMinScore("-1"), parseMinScore("abc")],
+    [0.3, 0.3, 0.5, 1, 0, 0.3]);
 
   if (failures.length) throw new Error(`${failures.length} retrieval fixture failures:\n${failures.join("\n")}`);
   console.log("retrieval fixtures passed");
