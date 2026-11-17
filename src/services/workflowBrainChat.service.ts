@@ -63,10 +63,7 @@ const answerDirectMemoryQuestion = (
 
   const best = candidates[0];
   logger.info(
-    `[WorkflowBrainDebug][brain:direct-memory] questionTokens=${JSON.stringify([...questionTokens])} candidates=${JSON.stringify(candidates.slice(0, 5).map((candidate) => ({
-      cleaned: candidate.cleaned.slice(0, 160),
-      overlap: candidate.overlap,
-    })))}`,
+    `[WorkflowBrainDebug][brain:direct-memory] candidates=${candidates.length} bestOverlap=${best?.overlap ?? 0}`,
   );
   if (!best || best.overlap < 2) return null;
 
@@ -185,7 +182,7 @@ class WorkflowBrainChatService {
 
     if (directMemoryAnswer) {
       logger.info(
-        `[WorkflowBrainDebug][brain:answer] mode=direct-memory categoryName="${categoryName}" answer="${directMemoryAnswer.slice(0, 220)}"`,
+        `[WorkflowBrainDebug][brain:answer] mode=direct-memory categoryName="${categoryName}"`,
       );
       return {
         answer: directMemoryAnswer,
@@ -242,7 +239,7 @@ class WorkflowBrainChatService {
       completion.choices[0]?.message?.content?.trim() ||
       "I could not generate a Workflow Brain answer for that category.";
     logger.info(
-      `[WorkflowBrainDebug][brain:answer] mode=openai categoryName="${categoryName}" answer="${aiAnswer.slice(0, 220)}"`,
+      `[WorkflowBrainDebug][brain:answer] mode=openai categoryName="${categoryName}"`,
     );
 
     return {

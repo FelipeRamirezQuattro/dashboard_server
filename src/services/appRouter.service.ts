@@ -184,7 +184,7 @@ class AppRouterService {
       const appApiKey = this.getAppApiKey(appName);
 
       logger.info(
-        `[${appName}] Connecting → mode: "${chatbotTarget.mode}", baseUrl: "${chatbotTarget.baseUrl}", endpoint: "${chatbotTarget.endpoint || "(full URL)"}", apiKey: ${appApiKey ? "present (" + appApiKey.substring(0, 8) + "...)" : "MISSING"}`,
+        `[${appName}] Connecting → mode: "${chatbotTarget.mode}", baseUrl: "${chatbotTarget.baseUrl}", endpoint: "${chatbotTarget.endpoint || "(full URL)"}", apiKey: ${appApiKey ? "present" : "MISSING"}`,
       );
 
       // Create client for this app
@@ -197,7 +197,7 @@ class AppRouterService {
 
       // Send query to app's chatbot endpoint
       logger.info(
-        `Routing query to ${appName}: "${message.substring(0, 50)}..." (${chatbotTarget.mode}: ${chatbotTarget.baseUrl}${chatbotTarget.endpoint})`,
+        `Routing query to ${appName} (${chatbotTarget.mode}: ${chatbotTarget.baseUrl}${chatbotTarget.endpoint})`,
       );
 
       const request: ChatbotQueryRequest = {

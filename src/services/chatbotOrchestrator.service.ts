@@ -218,7 +218,7 @@ class ChatbotOrchestrator {
 
     if (target.type === "workflow_brain") {
       logger.info(
-        `[WorkflowBrainDebug][orchestrator:workflow_brain] categoryId=${target.workflowBrainCategoryId || ""} message="${message.slice(0, 120)}"`,
+        `[WorkflowBrainDebug][orchestrator:workflow_brain] categoryId=${target.workflowBrainCategoryId || ""}`,
       );
       if (!target.workflowBrainCategoryId) {
         return {

@@ -24,9 +24,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     const userId = req.user?.id || "anonymous";
     const effectiveSessionId = sessionId || `default-${userId}`;
 
-    logger.info(
-      `Chatbot message from user ${userId}: ${message.substring(0, 50)}...`,
-    );
+    logger.info(`Chatbot message received from user ${userId}`);
 
     const userEmail = req.user?.email;
     const normalizedContext = {
