@@ -9,6 +9,7 @@ export interface ChatRequest {
   message: string;
   userId?: string;
   userEmail?: string;
+  userRole?: string;
   sessionId?: string;
   target?: ChatTarget;
   workflowBrainCategoryId?: string;

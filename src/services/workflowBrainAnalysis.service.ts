@@ -286,7 +286,12 @@ export const updateWorkflowStep = async (
   data: Partial<{ name: string; description: string; position: number; status: string }>,
 ) => {
   if (!mongoose.Types.ObjectId.isValid(stepId)) return null;
-  return BrainWorkflowStep.findByIdAndUpdate(stepId, data, {
+  // Whitelist: never let a body move a step to another category (categoryId) or touch other fields.
+  const update: Record<string, unknown> = {};
+  for (const key of ["name", "description", "position", "status"] as const) {
+    if (data[key] !== undefined) update[key] = data[key];
+  }
+  return BrainWorkflowStep.findByIdAndUpdate(stepId, update, {
     new: true,
     runValidators: true,
   });

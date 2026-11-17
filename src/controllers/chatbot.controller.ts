@@ -4,6 +4,12 @@ import { appRouterService } from "../services/appRouter.service";
 import { documentSearchService } from "../services/documentSearch.service";
 import { oneDriveService } from "../services/oneDrive.service";
 import { workflowBrainChatService } from "../services/workflowBrainChat.service";
+import {
+  asKnownRole,
+  BRAIN_CHAT_ACCESS_DENIED_REPLY,
+  BrainAccessError,
+} from "../services/brain/access";
+import { recordBrainAudit } from "../services/brainAudit.service";
 import logger from "../utils/logger";
 
 export const sendMessage = async (req: Request, res: Response) => {
@@ -16,6 +22,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     }
 
     const userId = req.user?.id || "anonymous";
+    const userRole = req.user?.role || "viewer";
     const effectiveSessionId = sessionId || `default-${userId}`;
 
     logger.info(
@@ -56,10 +63,34 @@ export const sendMessage = async (req: Request, res: Response) => {
         });
       }
 
-      const brainResponse = await workflowBrainChatService.answerQuestion(
-        categoryId,
-        message,
-      );
+      const brainRole = asKnownRole(req.user?.role);
+      let brainResponse;
+      try {
+        if (!brainRole) throw new BrainAccessError();
+        brainResponse = await workflowBrainChatService.answerQuestion(
+          categoryId,
+          message,
+          { id: userId, role: brainRole },
+        );
+      } catch (error) {
+        if (!(error instanceof BrainAccessError)) throw error;
+        await recordBrainAudit({
+          userId,
+          action: "BRAIN_ACCESS_DENIED",
+          target: "brain_chat",
+          metadata: { categoryId },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || undefined,
+        });
+        return res.status(200).json({
+          reply: BRAIN_CHAT_ACCESS_DENIED_REPLY,
+          timestamp: new Date(),
+          confidence: 0.4,
+          sessionId: effectiveSessionId,
+          source: "workflow_brain",
+          routedTo: "workflow_brain",
+        });
+      }
 
       return res.status(200).json({
         reply: brainResponse.answer,
@@ -147,6 +178,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       message,
       userId,
       userEmail,
+      userRole,
       sessionId: effectiveSessionId,
       target,
       workflowBrainCategoryId,

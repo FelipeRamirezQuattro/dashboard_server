@@ -3,6 +3,8 @@ import { env } from "../config/env";
 import { requireCategoryState } from "./workflowBrainState.service";
 import logger from "../utils/logger";
 import { normalize, tokensFor } from "./brain/text";
+import { BrainAccessError, CategoryAccessRole, roleMeets } from "./brain/access";
+import type { UserRole } from "../models/User.model";
 
 const summarizeItems = (items: unknown[], limit: number): unknown[] =>
   items.slice(0, limit).map((item) => {
@@ -124,9 +126,18 @@ class WorkflowBrainChatService {
   async answerQuestion(
     categoryId: string,
     question: string,
+    user: { id: string; role: UserRole },
   ): Promise<{ answer: string; categoryName: string; usedAi: boolean }> {
     const state = await requireCategoryState(categoryId);
-    const category = state.category as { name?: string; description?: string };
+    const category = state.category as {
+      name?: string;
+      description?: string;
+      accessRole?: CategoryAccessRole;
+    };
+    // Fail closed: a category without a readable accessRole is treated as admin-only.
+    if (!roleMeets(user.role, category.accessRole ?? "admin")) {
+      throw new BrainAccessError();
+    }
     const categoryName = category.name || "Selected Workflow Brain category";
     logger.info(
       `[WorkflowBrainDebug][brain:start] categoryId=${categoryId} categoryName="${categoryName}" memoryCount=${state.memories.length} workflowStepCount=${state.workflowSteps.length} question="${question.slice(0, 160)}"`,

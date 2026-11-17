@@ -170,9 +170,14 @@ export const updateCategory = async (
 ) => {
   if (!mongoose.Types.ObjectId.isValid(categoryId)) return null;
   const settings = parseSettings(data);
+  // Whitelist: never spread the raw request body into the model.
+  const fields: Record<string, unknown> = {};
+  for (const key of ["name", "description", "domain", "isActive"] as const) {
+    if (data[key] !== undefined) fields[key] = data[key];
+  }
   return WorkflowBrainCategory.findByIdAndUpdate(
     categoryId,
-    { ...data, ...settings, updatedBy: userId },
+    { ...fields, ...settings, updatedBy: userId },
     { new: true, runValidators: true },
   );
 };

@@ -6,6 +6,12 @@ import { documentSearchService } from "./documentSearch.service";
 import { n8nWebhookProvider } from "./n8nWebhook.service";
 import { oneDriveService } from "./oneDrive.service";
 import { workflowBrainChatService } from "./workflowBrainChat.service";
+import { recordBrainAudit } from "./brainAudit.service";
+import {
+  asKnownRole,
+  BRAIN_CHAT_ACCESS_DENIED_REPLY,
+  BrainAccessError,
+} from "./brain/access";
 import {
   appendConversationTurns,
   clearConversationHistory,
@@ -224,10 +230,31 @@ class ChatbotOrchestrator {
         };
       }
 
-      const result = await workflowBrainChatService.answerQuestion(
-        target.workflowBrainCategoryId,
-        message,
-      );
+      const brainRole = asKnownRole(request.userRole);
+      let result;
+      try {
+        if (!brainRole) throw new BrainAccessError();
+        result = await workflowBrainChatService.answerQuestion(
+          target.workflowBrainCategoryId,
+          message,
+          { id: request.userId || "", role: brainRole },
+        );
+      } catch (error) {
+        if (!(error instanceof BrainAccessError)) throw error;
+        await recordBrainAudit({
+          userId: request.userId,
+          action: "BRAIN_ACCESS_DENIED",
+          target: "brain_chat",
+          metadata: { categoryId: target.workflowBrainCategoryId },
+        });
+        return {
+          reply: BRAIN_CHAT_ACCESS_DENIED_REPLY,
+          timestamp: new Date(),
+          confidence: 0.4,
+          source: "workflow_brain",
+          routedTo: "workflow_brain",
+        };
+      }
 
       return {
         reply: result.answer,
