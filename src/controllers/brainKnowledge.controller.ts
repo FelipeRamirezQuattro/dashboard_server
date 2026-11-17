@@ -56,7 +56,7 @@ const uploadFieldsSchema = z.object({
 
 const statusSchema = z.object({
   status: z.enum(["active", "archived"]),
-  acknowledgeFlags: z.array(z.string().max(200)).max(500).optional(),
+  acknowledgeFlags: z.array(z.string().max(200)).max(5000).optional(),
 });
 
 export const uploadDocument = async (req: Request, res: Response): Promise<void> => {

@@ -11,6 +11,7 @@ import { extractTextFromBuffer } from "../services/documentText.service";
 import { oneDriveService } from "../services/oneDrive.service";
 import { s3FileStorageService } from "../services/s3FileStorage.service";
 import logger from "../utils/logger";
+import { fileBankVisibilityFilter } from "../services/brain/fileBankAccess";
 
 const router = Router();
 
@@ -106,9 +107,9 @@ router.post(
 router.get(
   "/",
   authenticate,
-  async (_req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
-      const files = await FileBank.find().sort({ uploadedAt: -1 });
+      const files = await FileBank.find(fileBankVisibilityFilter(req.user?.role)).sort({ uploadedAt: -1 });
       res.json({ files });
     } catch (error) {
       logger.error("Error fetching file bank:", error);
@@ -160,7 +161,10 @@ router.get(
         res.status(400).json({ error: "Invalid file ID" });
         return;
       }
-      const fileRecord = await FileBank.findById(req.params.id);
+      const fileRecord = await FileBank.findOne({
+        _id: req.params.id,
+        ...fileBankVisibilityFilter(req.user?.role),
+      });
       if (!fileRecord) {
         res.status(404).json({ error: "File not found" });
         return;

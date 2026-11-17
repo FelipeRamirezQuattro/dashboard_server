@@ -1,3 +1,4 @@
+import { fileBankVisibilityFilter } from "./brain/fileBankAccess";
 import {
   ChatProvider,
   ChatRequest,
@@ -317,7 +318,7 @@ class HybridChatProvider implements ChatProvider {
   private async lookupFileBank(message: string): Promise<ChatResponse | null> {
     try {
       const normalized = message.toLowerCase();
-      const files = await FileBank.find();
+      const files = await FileBank.find(fileBankVisibilityFilter()); // no role here: restricted records excluded
 
       for (const file of files) {
         const nameMatch = file.originalName?.toLowerCase().includes(normalized) ?? false;

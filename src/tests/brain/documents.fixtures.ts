@@ -6,7 +6,9 @@ import {
   buildPdfUploadFlags,
   buildUploadFlags,
   decideDuplicate,
-  detectSourceFormat,
+  decodeMarkdownBuffer,
+  detectUploadFormat,
+  sanitizeStoredName,
   mapDocumentErrorToHttp,
 } from "../../services/brain/documents.service";
 import { flagKey } from "../../services/brain/documentParser";
@@ -89,10 +91,29 @@ const pdfFlags = buildPdfUploadFlags([
 assertEqual(pdfFlags.map(flagKey), ["ignore_previous:p2:2"], "pdf flag key format");
 
 // format detection
-assertEqual(detectSourceFormat("a.md", "text/markdown"), "md", "md");
-assertEqual(detectSourceFormat("a.md", "text/plain"), "md", "md plain");
-assertEqual(detectSourceFormat("a.pdf", "application/pdf"), "pdf", "pdf");
-assertEqual(detectSourceFormat("a.pdf", "text/plain"), null, "mismatch");
-assertEqual(detectSourceFormat("a.exe", "application/pdf"), null, "bad ext");
+const mdBuf = Buffer.from("# hi\n");
+const pdfBuf = Buffer.from("junk\n%PDF-1.7\n...");
+for (const m of ["text/markdown", "text/x-markdown", "text/plain", "application/octet-stream", ""]) {
+  assertEqual(detectUploadFormat("a.md", m, mdBuf), "md", `md with ${m || "empty"}`);
+}
+assertEqual(detectUploadFormat("a.md", "application/pdf", mdBuf), "md", ".md claiming pdf mime, md bytes");
+assertEqual(detectUploadFormat("a.md", "text/plain", pdfBuf), null, ".md with pdf bytes");
+assertEqual(detectUploadFormat("a.pdf", "application/pdf", mdBuf), null, ".pdf without magic");
+assertEqual(detectUploadFormat("a.pdf", "text/plain", pdfBuf), "pdf", ".pdf wrong mime with magic");
+assertEqual(detectUploadFormat("A.PDF", "", pdfBuf), "pdf", "uppercase ext");
+assertEqual(detectUploadFormat("a.exe", "application/pdf", pdfBuf), null, ".exe");
+assertEqual(detectUploadFormat("a.txt", "text/plain", mdBuf), null, ".txt");
+assertEqual(mapDocumentErrorToHttp("INVALID_ENCODING"), 422, "INVALID_ENCODING");
+
+// decoding
+assertEqual(decodeMarkdownBuffer(Buffer.from("héllo ✓")), "héllo ✓", "valid utf8");
+assert(decodeMarkdownBuffer(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("---\n")])).endsWith("---\n"), "BOM ok");
+assertEqual(codeOf(() => decodeMarkdownBuffer(Buffer.from([0x61, 0xff, 0xfe, 0x62]))), "INVALID_ENCODING", "invalid utf8");
+assertEqual(codeOf(() => decodeMarkdownBuffer(Buffer.from([0x61, 0x00, 0x62]))), "INVALID_ENCODING", "NUL");
+
+// stored name
+assertEqual(sanitizeStoredName("../../etc/pass\u0007wd.pdf"), "passwd.pdf", "basename + control chars");
+assertEqual(sanitizeStoredName("C:\\x\\y.pdf"), "y.pdf", "windows path");
+assertEqual(sanitizeStoredName("a".repeat(300)).length, 200, "capped");
 
 console.log("documents fixtures OK");

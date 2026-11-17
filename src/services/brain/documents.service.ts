@@ -1,7 +1,10 @@
 import crypto from "crypto";
 import path from "path";
 import mongoose from "mongoose";
-import { BrainDocument, IBrainDocument } from "../../models/BrainKnowledge.model";
+import {
+  BrainDocument,
+  IBrainDocument,
+} from "../../models/BrainKnowledge.model";
 import { BrainMemory } from "../../models/WorkflowBrain.model";
 import FileBank from "../../models/FileBank.model";
 import { s3FileStorageService } from "../s3FileStorage.service";
@@ -21,7 +24,12 @@ import { scheduleDocumentEmbedding } from "./indexer.service";
 import logger from "../../utils/logger";
 
 export const MAX_ACTIVE_DOCUMENTS = 50;
-export const DOC_KINDS: DocKind[] = ["facts", "guidance", "glossary", "procedure"];
+export const DOC_KINDS: DocKind[] = [
+  "facts",
+  "guidance",
+  "glossary",
+  "procedure",
+];
 
 /** HTTP-aware error for conditions that are not DocumentError codes. */
 export class DocumentHttpError extends Error {
@@ -43,6 +51,7 @@ export const mapDocumentErrorToHttp = (code: string): number => {
     case "INVALID_PDF":
     case "TOO_MANY_PAGES":
     case "FLAGS_NOT_ACKNOWLEDGED":
+    case "INVALID_ENCODING":
       return 422;
     case "TOO_LARGE":
       return 413;
@@ -64,7 +73,8 @@ export interface StoredFlag {
  * PDF flags: id = `${patternId}:p${page}`, line = 1-based line within that page's raw text,
  * so the key is e.g. "ignore_previous:p3:5" and stays unique across pages.
  */
-export const flagKeyOf = (flag: { id: string; line: number }): string => flagKey(flag);
+export const flagKeyOf = (flag: { id: string; line: number }): string =>
+  flagKey(flag);
 
 /** Scan RAW markdown text (including HTML comments / hidden regions), never sanitized text. */
 export const buildUploadFlags = (rawText: string): StoredFlag[] =>
@@ -113,13 +123,18 @@ const toPayloads = (chunks: DocSection[]): ChunkPayload[] =>
   chunks
     .filter((c) => c.text.trim().length > 0)
     .map((c, i) => {
-      const p: ChunkPayload = { heading: c.heading, chunkIndex: i, content: c.text };
+      const p: ChunkPayload = {
+        heading: c.heading,
+        chunkIndex: i,
+        content: c.text,
+      };
       if (c.page !== undefined) p.page = c.page;
       return p;
     });
 
-export const buildMdChunks = (sections: { heading: string; text: string }[]): ChunkPayload[] =>
-  toPayloads(chunkSections(sections));
+export const buildMdChunks = (
+  sections: { heading: string; text: string }[],
+): ChunkPayload[] => toPayloads(chunkSections(sections));
 
 export const buildPdfChunks = (pages: PdfPage[]): ChunkPayload[] => {
   const sections: DocSection[] = [];
@@ -139,12 +154,48 @@ export interface DocMeta {
   tags?: string[];
 }
 
-export const detectSourceFormat = (originalname: string, mimetype: string): "md" | "pdf" | null => {
-  const ext = path.extname(originalname || "").toLowerCase();
-  const mime = (mimetype || "").toLowerCase();
-  if (ext === ".pdf" && mime === "application/pdf") return "pdf";
-  if (ext === ".md" && (mime === "text/markdown" || mime === "text/plain" || mime === "text/x-markdown")) return "md";
+
+/** Extension is authoritative for md; pdf requires %PDF- magic in the first 1024 bytes. null => 415. */
+export const detectUploadFormat = (
+  originalName: string,
+  _mimetype: string,
+  buffer: Buffer,
+): "md" | "pdf" | null => {
+  const ext = path.extname(originalName || "").toLowerCase();
+  const hasPdfMagic = buffer.subarray(0, 1024).includes("%PDF-");
+  if (ext === ".pdf") return hasPdfMagic ? "pdf" : null;
+  if (ext === ".md") {
+    if (hasPdfMagic) return null;
+    return "md"; // declared mimetype is untrusted (browsers send octet-stream, empty, x-markdown...)
+  }
   return null;
+};
+
+/** Strict UTF-8 decode (BOM tolerated); NUL bytes and invalid sequences are INVALID_ENCODING. */
+export const decodeMarkdownBuffer = (buf: Buffer): string => {
+  if (buf.includes(0))
+    throw new DocumentError(
+      "INVALID_ENCODING",
+      "The file is not valid UTF-8 text.",
+    );
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      buf,
+    );
+  } catch {
+    throw new DocumentError(
+      "INVALID_ENCODING",
+      "The file is not valid UTF-8 text.",
+    );
+  }
+};
+
+/** Stored File Bank name: basename only, control chars stripped, capped at 200 chars. */
+export const sanitizeStoredName = (name: string): string => {
+  const base = path
+    .basename((name || "").replace(/\\/g, "/"))
+    .replace(/[\u0000-\u001f\u007f]/g, "");
+  return (base || "document.pdf").slice(0, 200);
 };
 
 export const createDocument = async (p: {
@@ -153,14 +204,27 @@ export const createDocument = async (p: {
   meta?: Partial<DocMeta>;
   userId: string;
 }): Promise<IBrainDocument> => {
-  const format = detectSourceFormat(p.file.originalname, p.file.mimetype);
-  if (!format) throw new DocumentHttpError(415, "Only .md and .pdf files are supported.");
+  const format = detectUploadFormat(
+    p.file.originalname,
+    p.file.mimetype,
+    p.file.buffer,
+  );
+  if (!format)
+    throw new DocumentHttpError(415, "Only .md and .pdf files are supported.");
   if (format === "pdf" && !s3FileStorageService.isConfigured()) {
     throw new DocumentHttpError(503, "File Bank storage is not configured.");
   }
 
-  const contentHash = crypto.createHash("sha256").update(p.file.buffer).digest("hex");
-  const existing = await BrainDocument.find({ categoryId: p.categoryId, contentHash }).select("status").lean();
+  const contentHash = crypto
+    .createHash("sha256")
+    .update(p.file.buffer)
+    .digest("hex");
+  const existing = await BrainDocument.find({
+    categoryId: p.categoryId,
+    contentHash,
+  })
+    .select("status")
+    .lean();
   if (decideDuplicate(existing as { status: string }[])) {
     throw new DocumentHttpError(409, "This file was already uploaded.");
   }
@@ -170,7 +234,7 @@ export const createDocument = async (p: {
   let chunks: ChunkPayload[];
 
   if (format === "md") {
-    const raw = p.file.buffer.toString("utf8");
+    const raw = decodeMarkdownBuffer(p.file.buffer);
     const parsed = parseMarkdownDocument(raw);
     meta = {
       title: p.meta?.title || parsed.meta.title,
@@ -183,59 +247,91 @@ export const createDocument = async (p: {
     chunks = buildMdChunks(parsed.sections);
   } else {
     if (!p.meta?.title || !p.meta.kind) {
-      throw new DocumentError("MISSING_TITLE", "PDF uploads require a title and kind.");
+      throw new DocumentError(
+        "MISSING_TITLE",
+        "PDF uploads require a title and kind.",
+      );
     }
     meta = { ...p.meta, title: p.meta.title, kind: p.meta.kind };
     const pages = await extractPdfPages(p.file.buffer);
     flags = buildPdfUploadFlags(pages);
     chunks = buildPdfChunks(pages);
   }
-  if (!chunks.length) throw new DocumentError("NO_EXTRACTABLE_TEXT", "The document has no usable text.");
+  if (!chunks.length)
+    throw new DocumentError(
+      "NO_EXTRACTABLE_TEXT",
+      "The document has no usable text.",
+    );
 
   let fileBankId: mongoose.Types.ObjectId | undefined;
+  let uploadedKey: string | undefined;
+  const cleanupStorage = async (): Promise<void> => {
+    if (fileBankId)
+      await FileBank.deleteOne({ _id: fileBankId }).catch(() => undefined);
+    if (uploadedKey)
+      await s3FileStorageService
+        .deleteObject(uploadedKey)
+        .catch(() => undefined);
+  };
   if (format === "pdf") {
     const fileId = new mongoose.Types.ObjectId();
     const storedName = `${crypto.randomUUID()}.pdf`;
     const s3Key = `file-bank/${storedName}`;
-    await s3FileStorageService.uploadObject(s3Key, p.file.buffer, p.file.mimetype);
-    await new FileBank({
-      _id: fileId,
-      originalName: p.file.originalname,
-      storedName,
-      mimeType: p.file.mimetype,
-      sizeBytes: p.file.buffer.length,
-      description: `Brain document: ${meta.title}`,
-      tags: ["brain-document", p.categoryId],
-      contentText: "",
-      source: "local",
-      storageProvider: "s3",
+    await s3FileStorageService.uploadObject(
       s3Key,
-      syncStatus: "indexed",
-      uploadedBy: p.userId,
-      uploadedAt: new Date(),
-      filePath: s3FileStorageService.toUri(s3Key),
-      downloadUrl: `/file-bank/${fileId}/download`,
-    }).save();
-    fileBankId = fileId;
+      p.file.buffer,
+      "application/pdf",
+    );
+    uploadedKey = s3Key;
+    try {
+      await new FileBank({
+        _id: fileId,
+        originalName: sanitizeStoredName(p.file.originalname),
+        storedName,
+        mimeType: "application/pdf",
+        sizeBytes: p.file.buffer.length,
+        description: `Brain document: ${meta.title}`,
+        tags: ["brain-document", p.categoryId],
+        contentText: "",
+        source: "local",
+        storageProvider: "s3",
+        s3Key,
+        syncStatus: "indexed",
+        uploadedBy: p.userId,
+        uploadedAt: new Date(),
+        filePath: s3FileStorageService.toUri(s3Key),
+        downloadUrl: `/file-bank/${fileId}/download`,
+      }).save();
+      fileBankId = fileId;
+    } catch (error) {
+      await cleanupStorage();
+      throw new DocumentHttpError(500, "Failed to store the PDF.");
+    }
   }
 
-  const doc = await BrainDocument.create({
-    categoryId: p.categoryId,
-    title: meta.title,
-    kind: meta.kind,
-    version: meta.version,
-    status: "draft",
-    sourceFormat: format,
-    contentHash,
-    sizeBytes: p.file.buffer.length,
-    fileBankId,
-    flags,
-    tags: meta.tags ?? [],
-    source: meta.source,
-    chunkCount: chunks.length,
-    embeddingStatus: "none",
-    uploadedBy: p.userId,
-  });
+  let doc: IBrainDocument;
+  try {
+    doc = await BrainDocument.create({
+      categoryId: p.categoryId,
+      title: meta.title,
+      kind: meta.kind,
+      version: meta.version,
+      status: "draft",
+      sourceFormat: format,
+      contentHash,
+      sizeBytes: p.file.buffer.length,
+      fileBankId,
+      flags,
+      tags: meta.tags ?? [],
+      source: meta.source,
+      chunkCount: chunks.length,
+      embeddingStatus: "none",
+      uploadedBy: p.userId,
+    });
+  } catch (error) {
+    await cleanupStorage();
+    throw new DocumentHttpError(500, "Failed to store the document.");
+  }
 
   try {
     await BrainMemory.insertMany(
@@ -256,8 +352,11 @@ export const createDocument = async (p: {
     );
   } catch (error) {
     logger.error(`Brain document chunk insert failed for document ${doc._id}`);
-    await BrainMemory.deleteMany({ documentId: doc._id }).catch(() => undefined);
+    await BrainMemory.deleteMany({ documentId: doc._id }).catch(
+      () => undefined,
+    );
     await BrainDocument.deleteOne({ _id: doc._id }).catch(() => undefined);
+    await cleanupStorage();
     throw new DocumentHttpError(500, "Failed to store document chunks.");
   }
   return doc;
@@ -287,10 +386,16 @@ export const setDocumentStatus = async (p: {
     status: "active",
     _id: { $ne: doc._id },
   });
-  const activeCount = await BrainDocument.countDocuments({ categoryId: doc.categoryId, status: "active" });
+  const activeCount = await BrainDocument.countDocuments({
+    categoryId: doc.categoryId,
+    status: "active",
+  });
   const projected = activeCount + 1 - (previous ? 1 : 0);
   if (projected > MAX_ACTIVE_DOCUMENTS) {
-    throw new DocumentHttpError(409, `A category can have at most ${MAX_ACTIVE_DOCUMENTS} active documents.`);
+    throw new DocumentHttpError(
+      409,
+      `A category can have at most ${MAX_ACTIVE_DOCUMENTS} active documents.`,
+    );
   }
 
   doc.flags.forEach((f) => {
@@ -312,7 +417,9 @@ export const setDocumentStatus = async (p: {
 };
 
 export const listDocuments = async (categoryId: string) => {
-  const docs = await BrainDocument.find({ categoryId }).sort({ createdAt: -1 }).lean();
+  const docs = await BrainDocument.find({ categoryId })
+    .sort({ createdAt: -1 })
+    .lean();
   return docs.map((d) => ({
     id: String(d._id),
     title: d.title,
@@ -342,7 +449,13 @@ export const toDocumentSummary = (d: IBrainDocument) => ({
   version: d.version,
   status: d.status,
   sourceFormat: d.sourceFormat,
-  flags: d.flags.map((f) => ({ key: flagKey(f), id: f.id, line: f.line, excerpt: f.excerpt, acknowledged: f.acknowledged })),
+  flags: d.flags.map((f) => ({
+    key: flagKey(f),
+    id: f.id,
+    line: f.line,
+    excerpt: f.excerpt,
+    acknowledged: f.acknowledged,
+  })),
   chunkCount: d.chunkCount,
   embeddingStatus: d.embeddingStatus,
   fileBankId: d.fileBankId ? String(d.fileBankId) : undefined,

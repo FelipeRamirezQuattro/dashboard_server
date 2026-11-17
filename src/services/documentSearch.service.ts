@@ -1,3 +1,4 @@
+import { fileBankVisibilityFilter } from "./brain/fileBankAccess";
 import mongoose from "mongoose";
 import FileBank, { IFileBank } from "../models/FileBank.model";
 import { ChatDocumentResult, ChatResponse } from "../types/chatbot.types";
@@ -73,20 +74,22 @@ class DocumentSearchService {
     return DOCUMENT_QUERY_RE.test(message);
   }
 
+  /** `role` omitted/unknown => admin-only (brain-document) records are excluded. */
   async search(
     query: string,
     limit = 5,
     source?: "local" | "onedrive",
+    role?: string,
   ): Promise<DocumentSearchResult[]> {
     const trimmed = query.trim();
     if (trimmed.length < 2) return [];
 
-    const textResults = await this.textSearch(trimmed, limit, source);
+    const textResults = await this.textSearch(trimmed, limit, source, role);
     if (textResults.length) {
       return textResults;
     }
 
-    return this.regexSearch(trimmed, limit, source);
+    return this.regexSearch(trimmed, limit, source, role);
   }
 
   toChatResponse(results: DocumentSearchResult[]): ChatResponse | null {
@@ -135,10 +138,12 @@ class DocumentSearchService {
     query: string,
     limit: number,
     source?: "local" | "onedrive",
+    role?: string,
   ): Promise<DocumentSearchResult[]> {
     try {
       const results = await FileBank.find(
         {
+          ...fileBankVisibilityFilter(role),
           ...(source ? { source } : {}),
           $text: { $search: query },
         },
@@ -168,12 +173,14 @@ class DocumentSearchService {
     query: string,
     limit: number,
     source?: "local" | "onedrive",
+    role?: string,
   ): Promise<DocumentSearchResult[]> {
     const words = tokenize(query);
     if (!words.length) return [];
 
     const regexes = words.slice(0, 8).map((word) => new RegExp(escapeRegExp(word), "i"));
     const files = await FileBank.find({
+      ...fileBankVisibilityFilter(role),
       ...(source ? { source } : {}),
       $or: regexes.flatMap((regex) => [
         { originalName: regex },
