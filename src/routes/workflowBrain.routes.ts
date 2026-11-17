@@ -1,5 +1,6 @@
 import { Router } from "express";
 import * as controller from "../controllers/workflowBrain.controller";
+import * as knowledge from "../controllers/brainKnowledge.controller";
 import { authenticate } from "../middleware/auth.middleware";
 import { requireRole } from "../middleware/role.middleware";
 import { requireCategoryAccess } from "../middleware/categoryAccess.middleware";
@@ -72,6 +73,26 @@ router.post(
   requireRole("editor"),
   requireCategoryAccess("categoryId"),
   controller.createWorkflowStep,
+);
+
+router.post(
+  "/categories/:categoryId/documents",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.uploadDocumentFile,
+  knowledge.uploadDocument,
+);
+router.get(
+  "/categories/:categoryId/documents",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.getDocuments,
+);
+router.patch(
+  "/documents/:documentId",
+  requireRole("admin"),
+  requireCategoryAccess("documentId"),
+  knowledge.patchDocument,
 );
 
 export default router;
