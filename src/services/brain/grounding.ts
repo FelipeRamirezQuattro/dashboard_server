@@ -17,19 +17,125 @@ const MAX_STATEMENT_CHARS = 2000;
 // (so DEMO-001, 2024-03-15 and 210-290 stay separators). Thousands grouping needs exact 3-digit groups
 // ("1,210" => 1210); anything else splits ("1,2,3" => 1,2,3). Leading-dot decimals (".5") are numbers (0.5).
 const NUMBER_RE = /(?:(?<![\p{L}\p{N}])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)/gu;
+
+/*
+ * Number gate design (A6: "any number in an answer must equal a stored value in a cited record").
+ * The gate is a reading of the DISPLAYED text, so it first makes displayed text == checked text
+ * (sanitizeStatementText runs in parseModelOutput; validate and compose re-apply it, which is a no-op).
+ * A statement is then dropped (NUMBER_MISMATCH) unless every way a reader could see a number is a plain token
+ * that equals a stored token:
+ *  1. Characters that hide or change what a reader sees: any non-ASCII numeric character, any format (Cf),
+ *     combining (M) or default-ignorable character (Hangul fillers are letters but invisible), and any character
+ *     whose NFKC form adds a digit (e.g. U+33E0).
+ *  2. A letter run that follows a number (after zero or more separators) is an ALLOWLIST check: 1-5 letters must be
+ *     in NUMBER_SUFFIX_ALLOWLIST (units, ordinals, common short words); 6+ letters are words and pass unless they
+ *     contain a number-word stem or start with an oilfield magnitude prefix (mm..., bcf...). This subsumes
+ *     magnitude suffixes (k, bn, mln, G, ...), e-notation (2e3) and "x" in 2x10.
+ *  3. Power / times-ten notation (2^3, 2**3, 2 x 10, 2*10) and number words (hundred, ...illion, lakh, ...).
+ *  4. A single space-like separator followed by exactly three digits ("1 210") reads as thousands grouping.
+ *  5. A word that starts with a letter and contains a digit (identifier: v2k, id3e4f) must appear verbatim in the
+ *     cited evidence; otherwise it could be a currency/magnitude form (EUR2k) or a digit look-alike (l0).
+ * False drops are accepted in the safe direction (e.g. "2 x 10 ft", "1 210 days", "1.2 mm", "H2S" not in evidence).
+ */
+
+/** Short letter runs allowed directly after a number (lower-case). Anything 1-5 letters long not listed is dropped. */
+export const NUMBER_SUFFIX_ALLOWLIST: ReadonlySet<string> = new Set([
+  // units and ordinal suffixes
+  "in", "ft", "mil", "mils", "psi", "psig", "psia", "spm", "rpm", "gpm", "hr", "hrs", "min", "mins", "sec", "secs",
+  "s", "am", "pm", "day", "days", "yr", "yrs", "wk", "wks", "mo", "mos", "bbl", "bbls", "bpd", "bopd", "bwpd", "bfpd",
+  "deg", "degf", "degc", "lb", "lbs", "inch", "feet", "foot", "hp", "amp", "amps", "volt", "volts", "hz", "gal",
+  "gals", "ton", "tons", "pct", "st", "nd", "rd", "th", "well", "wells", "rod", "rods", "pump", "pumps", "jt", "jts",
+  "joint", "stage", "kg", "c", "f",
+  // common short words that follow numbers in prose
+  "a", "an", "the", "and", "or", "nor", "but", "so", "yet", "of", "to", "on", "at", "by", "for", "from", "with",
+  "into", "onto", "upon", "per", "via", "vs", "as", "is", "was", "are", "were", "be", "been", "being", "has", "had",
+  "have", "do", "did", "does", "done", "not", "no", "it", "its", "this", "that", "these", "those", "then", "than",
+  "when", "where", "which", "who", "whom", "whose", "what", "why", "how", "after", "over", "under", "about", "above",
+  "below", "since", "until", "till", "each", "every", "all", "any", "some", "more", "less", "most", "least", "both",
+  "only", "also", "just", "total", "new", "old", "ran", "run", "runs", "out", "up", "down", "off", "if", "we", "i",
+  "he", "she", "they", "them", "our", "your", "their", "there", "here", "same", "other", "such", "very", "much",
+  "many", "few", "prior", "later", "early", "late", "while", "again", "once", "twice", "may", "can", "will", "would",
+  "could", "might", "must", "shall", "show", "shows", "lower", "upper", "high", "low", "avg", "mean", "max", "rate",
+  "rates", "cost", "costs", "part", "parts", "pin", "box", "set", "sets", "rig", "rigs", "crew", "job", "jobs", "pull",
+  "pulls", "data", "row", "rows", "log", "logs", "note", "notes", "date", "dates", "id", "ids", "yes", "year", "years",
+  "month", "week", "weeks", "hour", "hours", "time", "times", "unit", "units", "item", "items", "case", "cases",
+  "event", "field", "lease", "zone", "depth", "wear", "worn", "broke", "break", "fail", "fails", "last", "first",
+  "next", "near", "deep", "long", "short", "wide", "size", "sizes", "type", "types", "used", "use", "uses", "got",
+  "among", "plus", "minus", "range", "had", "each", "until", "left", "right", "top", "base", "end", "ends", "start",
+]);
+// 6+ letter runs after a number that are still magnitude units (MMbbls, MMscfd, Bcfd, Mcfd, kbopd...).
+const MAGNITUDE_PREFIX_RE = /^(?:mm|mb|kb|bn|bcf|tcf|mcf|msc|bsc|tsc)/;
+// Number words: hundred/thousand/dozen/...illion/lakh/crore anywhere in a word; tens words and their -ieth/-ies
+// forms anywhere except directly after "w" (weighty); grand/lac/thou only as whole words (grandfathered, place).
+const NUMBER_WORD_RE =
+  /hundred|thousand|illion|dozen|lakh|crore|(?<!w)(?:twent|thirt|fort|fift|sixt|sevent|eight|ninet)(?:y|ie)|(?<![\p{L}\p{N}])(?:grands?|lacs?|thou)(?![\p{L}\p{N}])/iu;
+// Power and "times ten" notation: 2^3, 2**3, 2 x 10, 2 × 10, 2*10, 2·10. (Markdown bold "**210**" is allowed.)
+const POWER_RE = /\d\s*(?:\^|\*\*\s*[-+]?\d|[x\u00D7*\u00B7]\s*10)/i;
+// One space-like / apostrophe / underscore separator then exactly three digits: reads as 1 210 = 1210.
+const SPACE_GROUP_RE = /\d[\p{Zs}'\u2018\u2019_\u00B7\u2800]\d{3}(?!\d)/u;
 // Any non-ASCII numeric character (fullwidth, Arabic-Indic, superscripts, fractions, roman numerals) is rejected.
 const NON_ASCII_NUMERIC_RE = /(?![0-9])\p{N}/u;
-const INVISIBLE_RE = /[\p{Cf}\p{M}]/gu;
-// Exponents and magnitude suffixes cannot be verified token-wise: rejected. The number must not be glued to a
-// preceding letter (v2k, id3e4f are identifiers). "mil" and "ft" are deliberately not suffixes here.
-const MAGNITUDE_RE = new RegExp(
-  "(?<![\\p{L}\\d])(?<!\\d,)\\d[\\d,]*(?:\\.\\d+)?(?:[eE][+-]?\\d|\\^|\\s?(?:mm|bn|tn|k|m|b|t|(?:mm|m|k)bbl)(?![\\p{L}\\p{N}]))",
-  "iu"
-);
-// Large number words are rejected wherever they occur in a word ("onehundred", "hundreds"); the tens words need a
-// leading word boundary so "weighty" is fine. Small words (one, two, eleven, ...) are intentionally allowed: this
-// gate checks numeric tokens only, and a matching token may come from any part of the cited text, not a field.
-const NUMBER_WORD_RE = /(?:hundred|thousand|million|billion|trillion|dozen)|\b(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)/i;
+const HIDDEN_RE = /[\p{Cf}\p{M}\p{Default_Ignorable_Code_Point}]/u;
+const HIDDEN_RE_G = /[\p{Cf}\p{M}\p{Default_Ignorable_Code_Point}]/gu;
+const ASCII_DIGITS_RE = /[0-9]/g;
+const WORD_RE = /[\p{L}\p{N}]+/gu;
+
+// ---- canonical statement text (A): what is checked is exactly what is displayed
+const SPACE_LIKE_RE = /[\p{Cc}\p{Z}]+/gu; // all controls (incl. \n, U+0085) and space/line/paragraph separators
+// Emoji presentation selectors (U+FE0E/FE0F) after a symbol (warning sign) are cosmetic and removed; anywhere else
+// they stay and drop the statement.
+const EMOJI_VS_RE = /(?<=[\p{So}\p{Sk}])[\uFE0E\uFE0F]/gu;
+const OPEN_BRACKETS = new Set(["[", "\uFF3B", "\u3010", "\u3014", "\u3016", "\u27E6"]);
+const CLOSE_BRACKETS = new Set(["]", "\uFF3D", "\u3011", "\u3015", "\u3017", "\u27E7"]);
+const isAsciiDigit = (c: string): boolean => c >= "0" && c <= "9";
+
+/** True when out[from..] is " "* digit+ " "* (the body of a citation marker). */
+const isMarkerBody = (out: string[], from: number): boolean => {
+  let i = from;
+  while (i < out.length && out[i] === " ") i++;
+  const d = i;
+  while (i < out.length && isAsciiDigit(out[i])) i++;
+  if (i === d) return false;
+  while (i < out.length && out[i] === " ") i++;
+  return i === out.length;
+};
+
+/**
+ * Remove every bracketed numeric marker ("[1]", "[ 12 ]", nested "[[1]2]" -> fixed point) in one linear pass,
+ * replacing each by a space. Equivalent to repeating the replacement until nothing changes.
+ */
+const stripMarkers = (s: string): string => {
+  const out: string[] = [];
+  const opens: number[] = []; // positions in `out` of open brackets that could still start a marker
+  for (const ch of s) {
+    if (CLOSE_BRACKETS.has(ch) && opens.length > 0) {
+      const p = opens[opens.length - 1];
+      if (isMarkerBody(out, p + 1)) {
+        out.length = p;
+        opens.pop();
+        out.push(" ");
+        continue;
+      }
+      opens.length = 0; // this close bracket now sits inside every earlier candidate's body
+      out.push(ch);
+      continue;
+    }
+    if (OPEN_BRACKETS.has(ch)) opens.push(out.length);
+    else if (ch !== " " && !isAsciiDigit(ch)) opens.length = 0; // letters etc. are never removed later
+    out.push(ch);
+  }
+  return out.join("");
+};
+
+/**
+ * The one canonical statement text: every control / space / line-separator run becomes one space, bracketed
+ * numeric markers are removed, spaces collapsed, ends trimmed. Idempotent. parseModelOutput applies it before the
+ * length cap; validateStatements checks exactly this text and composeAnswer displays exactly this text.
+ */
+export function sanitizeStatementText(text: string): string {
+  const composed = text.normalize("NFC").replace(EMOJI_VS_RE, ""); // NFC is canonical-equivalent: same rendering
+  return stripMarkers(composed.replace(SPACE_LIKE_RE, " ")).replace(/ {2,}/g, " ").trim();
+}
 
 const normalizeNumber = (token: string): string => {
   const neg = token.startsWith("-");
@@ -41,12 +147,67 @@ const normalizeNumber = (token: string): string => {
   return neg && value !== "0" ? `-${value}` : value;
 };
 const foldDashes = (text: string): string => text.replace(/[\p{Pd}\u2212\u2796\uFE63\uFF0D]/gu, "-");
-/** NFKC + dash folding; evidence additionally has format/combining characters stripped. */
-const prep = (text: string, stripInvisible: boolean): string => {
-  const n = text.normalize("NFKC");
-  return foldDashes(stripInvisible ? n.replace(INVISIBLE_RE, "") : n);
+/** NFKC + dash folding; evidence additionally has format/combining/default-ignorable characters stripped. */
+// Evidence: a non-decimal numeric (superscript, fraction, circled, roman) or a symbol whose NFKC form contains a
+// digit (U+33E0) is not a stored value; it is blanked so NFKC cannot turn "m²" into a stored "2".
+const evidenceNumericFold = (ch: string): string =>
+  /\p{Nd}/u.test(ch) || !/\d/.test(ch.normalize("NFKC")) ? ch : " ";
+const prep = (text: string, stripHidden: boolean): string => {
+  const n = (stripHidden ? text.replace(/[^\x00-\x7F]/gu, evidenceNumericFold) : text).normalize("NFKC");
+  return foldDashes(stripHidden ? n.replace(HIDDEN_RE_G, "") : n);
 };
 const numberTokens = (prepared: string): string[] => (prepared.match(NUMBER_RE) ?? []).map(normalizeNumber);
+const isLetter = (c: string): boolean => /\p{L}/u.test(c);
+const isDigitOrLetter = (c: string): boolean => /[\p{L}\p{N}]/u.test(c);
+// Characters that end the "what follows this number" scan: clause punctuation and closing brackets.
+const SCAN_STOP = new Set([",", ";", ":", "!", "?", ")", "]", "}"]);
+
+/** Letter runs that follow a number, after zero or more separator characters (linear scan). */
+const suffixViolation = (t: string): boolean => {
+  const cs = Array.from(t);
+  for (let i = 0; i < cs.length; i++) {
+    if (!isAsciiDigit(cs[i]) || (i + 1 < cs.length && isAsciiDigit(cs[i + 1]))) continue;
+    let j = i + 1;
+    // "5. Then" ends a sentence; any other run of non-letter, non-digit, non-stop characters is a separator.
+    if (cs[j] === "." && (j + 1 >= cs.length || cs[j + 1] === " ")) continue;
+    while (j < cs.length && !isDigitOrLetter(cs[j]) && !SCAN_STOP.has(cs[j])) j++;
+    if (j >= cs.length || !isLetter(cs[j])) { i = j - 1; continue; }
+    let k = j;
+    while (k < cs.length && isLetter(cs[k])) k++;
+    const run = cs.slice(j, k).join("").toLowerCase();
+    if (run.length <= 5 ? !NUMBER_SUFFIX_ALLOWLIST.has(run) : MAGNITUDE_PREFIX_RE.test(run)) return true;
+    i = k - 1;
+  }
+  return false;
+};
+
+// Dotted sequences (1.2.3, 2024.03.15) are not decimals; they must be copied verbatim from evidence.
+const DOTTED_RE = /(?<![\d.])\.?\d+(?:\.\d+){2,}/g; // lookbehind keeps it linear
+
+/** Returns true when the (already sanitized) statement text cannot pass the number gate against this evidence. */
+const numberGateFails = (
+  text: string,
+  evidenceNumbers: Set<string>,
+  evidenceWords: Set<string>,
+  evidenceDotted: Set<string>
+): boolean => {
+  if (NON_ASCII_NUMERIC_RE.test(text) || HIDDEN_RE.test(text)) return true;
+  const nfkc = text.normalize("NFKC");
+  if (HIDDEN_RE.test(nfkc)) return true;
+  if ((text.match(ASCII_DIGITS_RE) ?? []).length !== (nfkc.match(ASCII_DIGITS_RE) ?? []).length) return true;
+  const t = foldDashes(nfkc);
+  if (NUMBER_WORD_RE.test(t) || POWER_RE.test(t) || SPACE_GROUP_RE.test(t)) return true;
+  if ((t.match(DOTTED_RE) ?? []).some((d) => !evidenceDotted.has(d))) return true;
+  // identifiers (letter first, contains a digit) must be copied verbatim from evidence; mask them for the suffix scan
+  let identifierMissing = false;
+  const masked = t.replace(WORD_RE, (w) => {
+    if (!/^\p{L}/u.test(w) || !/\d/.test(w)) return w;
+    if (!evidenceWords.has(w.toLowerCase())) identifierMissing = true;
+    return "#";
+  });
+  if (identifierMissing || suffixViolation(masked)) return true;
+  return numberTokens(t).some((n) => !evidenceNumbers.has(n));
+};
 export const DRAFT_LINE = "DRAFT — suggestions only; an engineer must review.";
 
 const SYSTEM_PROMPT = [
@@ -102,8 +263,9 @@ export function parseModelOutput(raw: string): Statement[] {
     const { text, citations } = item as { text?: unknown; citations?: unknown };
     if (typeof text !== "string" || !text.trim()) return bad();
     if (!Array.isArray(citations) || !citations.every((c) => typeof c === "string")) return bad();
-    if (text.length > MAX_STATEMENT_CHARS) continue; // never truncate: a cut could hide a changed number
-    out.push({ text, citations: citations as string[] });
+    const clean = sanitizeStatementText(text); // canonical text: checked == displayed
+    if (!clean || clean.length > MAX_STATEMENT_CHARS) continue; // never truncate: a cut could hide a changed number
+    out.push({ text: clean, citations: citations as string[] });
   }
   return out;
 }
@@ -119,23 +281,18 @@ export function validateStatements(
 
   for (const s of statements) {
     const citations = Array.from(new Set(s.citations));
-    const statement: Statement = { text: s.text, citations };
+    const statement: Statement = { text: sanitizeStatementText(s.text), citations }; // no-op after parseModelOutput
     const drop = (reason: DropReason): void => {
       dropped.push({ statement, reason });
     };
     if (citations.length === 0) { drop("NO_CITATION"); continue; }
     if (citations.some((id) => !byId.has(id))) { drop("UNKNOWN_CITATION"); continue; }
     if (citations.some((id) => byId.get(id)!.isGuidance)) { drop("GUIDANCE_CITATION"); continue; }
-    const normalized = s.text.normalize("NFKC");
-    if (
-      NON_ASCII_NUMERIC_RE.test(s.text) ||
-      /[\p{Cf}\p{M}]/u.test(s.text) ||
-      /[\p{Cf}\p{M}]/u.test(normalized)
-    ) { drop("NUMBER_MISMATCH"); continue; }
-    const text = prep(s.text, false);
-    if (NUMBER_WORD_RE.test(text) || MAGNITUDE_RE.test(text)) { drop("NUMBER_MISMATCH"); continue; }
-    const evidenceNumbers = new Set(citations.flatMap((id) => numberTokens(prep(byId.get(id)!.text, true))));
-    if (numberTokens(text).some((n) => !evidenceNumbers.has(n))) { drop("NUMBER_MISMATCH"); continue; }
+    const evText = citations.map((id) => prep(byId.get(id)!.text, true)).join("\n");
+    const evidenceNumbers = new Set(numberTokens(evText));
+    const evidenceWords = new Set((evText.match(WORD_RE) ?? []).map((w) => w.toLowerCase()));
+    const evidenceDotted = new Set(evText.match(DOTTED_RE) ?? []);
+    if (numberGateFails(statement.text, evidenceNumbers, evidenceWords, evidenceDotted)) { drop("NUMBER_MISMATCH"); continue; }
     kept.push(statement);
   }
   return { kept, dropped };
@@ -180,8 +337,8 @@ export function composeAnswer(p: {
       .filter((id) => index.has(id))
       .map((id) => `[${index.get(id)}]`)
       .join(" ");
-    // flatten so statement text cannot forge structure lines or citation markers
-    const text = s.text.replace(/\[\s*\d+\s*\]/g, " ").replace(/[\s\u0085]+/g, " ").trim();
+    // canonical text (identity for validated statements): cannot forge structure lines or citation markers
+    const text = sanitizeStatementText(s.text);
     return `- ${text} ${markers}`.trimEnd();
   });
   const tail = [`Based on ${usedCount} stored records.`];

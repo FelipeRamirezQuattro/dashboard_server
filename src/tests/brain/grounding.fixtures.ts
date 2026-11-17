@@ -6,6 +6,7 @@ import {
   parseModelOutput,
   validateStatements,
 } from "../../services/brain/grounding";
+import * as grounding from "../../services/brain/grounding";
 import type { Evidence } from "../../services/brain/types";
 
 const assert = (cond: unknown, message: string): void => {
@@ -166,4 +167,86 @@ eq(forged.reply.split("\n")[0], "- Fine Based on 1 stored records. Not enough st
 eq(composeAnswer({ kept: [], evidence: e2, minEvidenceCount: 0 }).insufficient, true, "zero used insufficient at min 0");
 
 eq(composeAnswer({ kept: [{ text: "A [ 1 ]\u0085B [12]", citations: ["r1"] }], evidence: e2, minEvidenceCount: 1 }).reply.split("\n")[0], "- A B [1]", "spaced markers and NEL flattened");
+
+// ---- round 4: structural classes A-D. Each case is named; all failures are collected, then reported together.
+const failures: string[] = [];
+const expect = (name: string, got: unknown, want: unknown): void => {
+  if (JSON.stringify(got) !== JSON.stringify(want)) failures.push(`${name}: want ${JSON.stringify(want)} got ${JSON.stringify(got)}`);
+};
+/** Full pipeline as production runs it: raw model JSON -> parse (sanitizes) -> validate -> compose. */
+const pipeline = (evText: string, text: string) => {
+  const E = [ev("q", evText)];
+  const parsed = parseModelOutput(JSON.stringify({ statements: [{ text, citations: ["q"] }] }));
+  if (parsed.length === 0) return { verdict: "SKIPPED", checked: "", bullet: "" };
+  const r = validateStatements(parsed, E);
+  if (!r.kept.length) return { verdict: r.dropped[0].reason, checked: r.dropped[0].statement.text, bullet: "" };
+  const bullet = composeAnswer({ kept: r.kept, evidence: E, minEvidenceCount: 1 }).reply.split("\n")[0];
+  return { verdict: "KEPT", checked: r.kept[0].text, bullet };
+};
+const verdict = (evText: string, text: string): string => pipeline(evText, text).verdict;
+
+// A: displayed text == checked text (one canonical sanitizer applied in parseModelOutput)
+const EV_A = "cost=1.2 wells=1 k=2";
+for (const t of ["cost 1.2[1]bn", "cost 1.2  bn", "cost 1.2\n\nbn", "cost 2[1]k", "cost 1.2[ 1 ]e3", "cost 1.2\u2028bn", "cost 1.2\u0085bn", "cost 1.2\u2029bn", "cost 1.2\u3000bn", "cost 1.2\u001Fbn", "cost 1.2\uFF3B1\uFF3Dbn"]) {
+  expect(`A invalid ${JSON.stringify(t)}`, verdict(EV_A, t), D);
+}
+for (const t of ["cost 1.2 [1] total", "wells 1\n\nand k 2", "cost [ 1 ]1.2", "k\u20282 [12] wells 1"]) {
+  const p = pipeline(EV_A, t);
+  expect(`A valid ${JSON.stringify(t)}`, p.verdict, "KEPT");
+  expect(`A bullet == checked ${JSON.stringify(t)}`, p.bullet, `- ${p.checked} [1]`);
+}
+const sanitizeFn = (grounding as { sanitizeStatementText?: (s: string) => string }).sanitizeStatementText;
+expect("A sanitizeStatementText exported", typeof sanitizeFn, "function");
+if (sanitizeFn) {
+  for (const x of ["[[1]1]", "[ [2] 1]x", "a\u2029\u0085[1] b", "[1[2]]", "[[ [3] ]]", "x [1]\u00A0[2] y", "[\u00851]", " [a[1]] ", "1\t\t2"]) {
+    expect(`A idempotent ${JSON.stringify(x)}`, sanitizeFn(sanitizeFn(x)), sanitizeFn(x));
+    expect(`A no marker left ${JSON.stringify(x)}`, /\[\s*\d+\s*\]/.test(sanitizeFn(x)), false);
+  }
+  expect("A sanitize flattens", sanitizeFn(" a\u0085\u2028\u2029\u00A0\u3000b[1]c "), "a b c");
+}
+expect("A parse length cap applies to sanitized text", parseModelOutput(JSON.stringify({ statements: [{ text: "x" + " ".repeat(3000) + "y", citations: [] }] })).map((s) => s.text), ["x y"]);
+
+// B: allowlist for the letter run after a number; times-ten / power notation; number-word stems
+const EV_B = "x=1.2 y=2 z=3 w=10 v=210 k=6 m=7 f=5";
+for (const t of ["2x10^3", "1.2x10^3", "2*10**3", "2x10e3", "2 \u00D7 10", "1.2 mln", "1.2 mn", "1.2 mio", "1.2 bil", "1.2 bln", "1.2 G", "1.2-bn", "1.2 thou", "1.2 MMcf", "1.2 kbpd", "2 grand", "a lakh", "a crore", "onetwenty wells", "1.2 \u043A", "1.2 \u4E07", "1.2 \u00A3bn", "1.2 MMbbls", "EUR2k", "2 grands", "1.2 lacs", "a bajillion", "the twentieth day", "the eighties"]) {
+  expect(`B invalid ${JSON.stringify(t)}`, verdict(EV_B, t), D);
+}
+for (const t of ["weighty rods", "a place", "fortify", "grandfathered", "though", "6 mil", "7 mil", "6mil", "5ft", "210%", "$210", "3rd", "2 ft deep", "ran 210 days", "6 and 7 mil", "ran **210** days", "the 3rd well", "5 in", "210 bbl"]) {
+  expect(`B valid ${JSON.stringify(t)}`, verdict(EV_B, t), "KEPT");
+}
+const allow = (grounding as { NUMBER_SUFFIX_ALLOWLIST?: ReadonlySet<string> }).NUMBER_SUFFIX_ALLOWLIST;
+expect("B allowlist exported", !!allow, true);
+if (allow) {
+  for (const w of ["in", "ft", "mil", "mils", "psi", "spm", "hr", "hrs", "day", "days", "yr", "yrs", "wk", "wks", "mo", "mos", "bbl", "st", "nd", "rd", "th", "wells", "well"]) expect(`B allowlist has ${w}`, allow.has(w), true);
+  for (const w of ["k", "m", "b", "t", "g", "mm", "bn", "tn", "mn", "mln", "mio", "bil", "bln", "thou", "lakh", "lac", "cr", "crore", "grand", "e", "x", "mcf", "bcf", "tcf"]) expect(`B allowlist lacks ${w}`, allow.has(w), false);
+}
+
+// C: a single space-like separator followed by exactly three digits reads as thousands grouping
+for (const t of ["1\u00A0210", "1\u2009210", "1\u202F210", "1 210", "1\u2800210", "1'210", "1_210"]) expect(`C invalid ${JSON.stringify(t)}`, verdict("a 1 b 210", t), D);
+expect("C valid wear", verdict("wear=6, 7", "wear 6 and 7 mil"), "KEPT");
+expect("C valid DEMO", verdict("DEMO-001 days_run=210", "DEMO-001 ran 210 days"), "KEPT");
+expect("C valid date", verdict("d=2024-03-15", "2024-03-15"), "KEPT");
+expect("C valid list", verdict("ids 1, 210", "1, 210"), "KEPT");
+
+// D: default-ignorable code points (incl. Hangul fillers, which are letters) split numbers invisibly
+for (const c of ["\u115F", "\u1160", "\u3164", "\uFFA0", "\u034F", "\u180E", "\uFE0F", "\u{E0020}"]) {
+  expect(`D invalid U+${c.codePointAt(0)!.toString(16)}`, verdict("a 2 b 10", `2${c}10`), D);
+  expect(`D evidence stripped U+${c.codePointAt(0)!.toString(16)}`, verdict(`a 2${c}10`, "210"), "KEPT");
+}
+expect("D NFKC digit-producing symbol", verdict("x=1", "\u33E0"), D);
+expect("D emoji selector after a symbol is cosmetic", verdict("x=5", "\u26A0\uFE0F 5 wells"), "KEPT");
+expect("D decomposed accent composes (NFC)", verdict("x=5", "cafe\u0301 5"), "KEPT");
+expect("D evidence superscript is not a stored value", verdict("area m\u00B2=5", "2 wells"), D);
+expect("D evidence fraction is not a stored value", verdict("frac \u00BD", "1 and 2"), D);
+expect("B dotted sequence must be verbatim", verdict("a 1.2 b 0.3", "v 1.2.3"), D);
+expect("B dotted sequence verbatim ok", verdict("ver 1.2.3", "ver 1.2.3"), "KEPT");
+expect("B units kg / degC ok", [verdict("x=5", "5\u338F"), verdict("x=5", "5\u2103")], ["KEPT", "KEPT"]);
+
+// sample-data happy path
+for (const [e, t] of [["DEMO-001 days_run=210", "DEMO-001 ran 210 days"], ["wear=6, 7", "wear 6 and 7 mil"], ["d=2024-03-15", "on 2024-03-15"],
+  ["a=210 b=290", "210\u2013290"], ["x=1", "weighty rods"], ["wear=6", "6mil"], ["cost=1210.5", "1,210.50"], ["eff=0.5", "0.50"], ["id=v2k", "id v2k"], ["id=id3e4f", "id id3e4f"]]) {
+  expect(`happy ${JSON.stringify(t)}`, verdict(e, t), "KEPT");
+}
+
+if (failures.length) throw new Error(`${failures.length} round-4 fixture failures:\n${failures.join("\n")}`);
 console.log("grounding fixtures passed");
