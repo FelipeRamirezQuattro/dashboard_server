@@ -13,7 +13,23 @@ export type DropReason = "NO_CITATION" | "UNKNOWN_CITATION" | "GUIDANCE_CITATION
 
 const MAX_STATEMENTS = 30;
 const MAX_STATEMENT_CHARS = 2000;
-const NUMBER_RE = /\d+(?:\.\d+)?/g;
+// A "-" is a sign only at the start or after whitespace/"("; digit runs joined by commas are one token
+// (valid thousands grouping or not), so "1,1" becomes 11 and cannot match a stored 1 and 1.
+const NUMBER_RE = /(?:(?<=^|[\s(])-)?\d+(?:,\d+)*(?:\.\d+)?/g;
+const NON_ASCII_DIGIT_RE = /(?![0-9])\p{Nd}/u;
+// Large number words are rejected. Small words (one, two, ...) are intentionally allowed: this gate checks
+// numeric tokens only, and a matching token may come from any part of the cited text, not a specific field.
+const NUMBER_WORD_RE = /\b(?:hundred|thousand|million|billion|dozen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/i;
+
+const normalizeNumber = (token: string): string => {
+  const neg = token.startsWith("-");
+  const body = (neg ? token.slice(1) : token).replace(/,/g, "");
+  const [intRaw, decRaw = ""] = body.split(".");
+  const int = intRaw.replace(/^0+(?=\d)/, "");
+  const dec = decRaw.replace(/0+$/, "");
+  return `${neg ? "-" : ""}${int}${dec ? "." + dec : ""}`;
+};
+const numberTokens = (text: string): string[] => (text.match(NUMBER_RE) ?? []).map(normalizeNumber);
 export const DRAFT_LINE = "DRAFT — suggestions only; an engineer must review.";
 
 const SYSTEM_PROMPT = [
@@ -60,17 +76,19 @@ export function parseModelOutput(raw: string): Statement[] {
     return bad();
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return bad();
-  const list = (parsed as { statements?: unknown }).statements;
-  if (!Array.isArray(list)) return bad();
+  const rawList = (parsed as { statements?: unknown }).statements;
+  if (!Array.isArray(rawList)) return bad();
+  const list = rawList.slice(0, MAX_STATEMENTS); // cap first: items past the cap are never inspected
   const out: Statement[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object") return bad();
     const { text, citations } = item as { text?: unknown; citations?: unknown };
     if (typeof text !== "string" || !text.trim()) return bad();
     if (!Array.isArray(citations) || !citations.every((c) => typeof c === "string")) return bad();
-    out.push({ text: text.slice(0, MAX_STATEMENT_CHARS), citations: citations as string[] });
+    if (text.length > MAX_STATEMENT_CHARS) continue; // never truncate: a cut could hide a changed number
+    out.push({ text, citations: citations as string[] });
   }
-  return out.slice(0, MAX_STATEMENTS);
+  return out;
 }
 
 export function validateStatements(
@@ -91,16 +109,15 @@ export function validateStatements(
     if (citations.length === 0) { drop("NO_CITATION"); continue; }
     if (citations.some((id) => !byId.has(id))) { drop("UNKNOWN_CITATION"); continue; }
     if (citations.some((id) => byId.get(id)!.isGuidance)) { drop("GUIDANCE_CITATION"); continue; }
-    const evidenceNumbers = new Set(
-      citations.flatMap((id) => byId.get(id)!.text.match(NUMBER_RE) ?? [])
-    );
-    const numbers = s.text.match(NUMBER_RE) ?? [];
-    if (numbers.some((n) => !evidenceNumbers.has(n))) { drop("NUMBER_MISMATCH"); continue; }
+    if (NON_ASCII_DIGIT_RE.test(s.text) || NUMBER_WORD_RE.test(s.text)) { drop("NUMBER_MISMATCH"); continue; }
+    const evidenceNumbers = new Set(citations.flatMap((id) => numberTokens(byId.get(id)!.text)));
+    if (numberTokens(s.text).some((n) => !evidenceNumbers.has(n))) { drop("NUMBER_MISMATCH"); continue; }
     kept.push(statement);
   }
   return { kept, dropped };
 }
 
+/** Trusts that validateStatements already ran on `kept`; it does not re-check citations or numbers. */
 export function composeAnswer(p: {
   kept: Statement[];
   evidence: Evidence[];
@@ -121,7 +138,7 @@ export function composeAnswer(p: {
   }
   const usedCount = order.length;
 
-  if (p.kept.length === 0 || usedCount < p.minEvidenceCount) {
+  if (p.kept.length === 0 || usedCount === 0 || usedCount < p.minEvidenceCount) {
     return {
       reply: [
         "Not enough stored information to answer this.",
@@ -139,7 +156,9 @@ export function composeAnswer(p: {
       .filter((id) => index.has(id))
       .map((id) => `[${index.get(id)}]`)
       .join(" ");
-    return `- ${s.text.trim()} ${markers}`.trimEnd();
+    // flatten so statement text cannot forge structure lines or citation markers
+    const text = s.text.replace(/\[\d+\]/g, " ").replace(/\s+/g, " ").trim();
+    return `- ${text} ${markers}`.trimEnd();
   });
   const tail = [`Based on ${usedCount} stored records.`];
   if (p.kept.some((s) => /recommend/i.test(s.text))) tail.push(DRAFT_LINE);

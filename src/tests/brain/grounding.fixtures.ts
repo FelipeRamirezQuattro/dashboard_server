@@ -56,10 +56,15 @@ throwsBad(() => parseModelOutput('{"other":[]}'), "no statements");
 throwsBad(() => parseModelOutput("[]"), "array root");
 eq(parseModelOutput('```json\n{"statements":[{"text":"x","citations":["a"],"extra":1}]}\n```'), [{ text: "x", citations: ["a"] }], "fenced + extra ignored");
 eq(parseModelOutput('{"statements":[]}'), [], "empty ok");
+const bigOk = JSON.stringify({ statements: [{ text: "y".repeat(2000), citations: [] }, { text: "z".repeat(2001), citations: [] }, { text: "k", citations: [] }] });
+eq(parseModelOutput(bigOk).map((x) => x.text.length), [2000, 1], "over-long statement dropped, not truncated");
+const trunc = JSON.stringify({ statements: [{ text: "a".repeat(1995) + " 2100", citations: ["x"] }] });
+eq(parseModelOutput(trunc)[0].text.endsWith("2100"), true, "2000-char kept intact");
+const cap31 = JSON.stringify({ statements: [...Array.from({ length: 30 }, () => ({ text: "s", citations: [] })), { bad: true }] });
+eq(parseModelOutput(cap31).length, 30, "malformed 31st item ignored");
 const many = JSON.stringify({ statements: Array.from({ length: 40 }, () => ({ text: "y".repeat(2500), citations: [] })) });
 const capped = parseModelOutput(many);
-eq(capped.length, 30, "statement cap");
-eq(capped[0].text.length, 2000, "text cap");
+eq(capped.length, 0, "all over-long statements dropped");
 
 // validate
 const evidence = [
@@ -82,6 +87,17 @@ eq(reason("ran 210.5 days", ["r1"]), "NUMBER_MISMATCH", "decimal mismatch");
 eq(reason("no numbers here", ["r1"]), "KEPT", "no numbers");
 eq(validateStatements([{ text: "a", citations: ["r1", "r1"] }], evidence).kept[0].citations, ["r1"], "dedupe citations");
 
+// number gate
+const numEv = [ev("n1", "well 1 days_run=210 date 2024-03-15 rate 89.70 cost 1,210 flow 210.0 range 210-290"), ev("n2", "id 2100")];
+const nr = (t: string, c = "n1") => {
+  const r = validateStatements([{ text: t, citations: [c] }], numEv);
+  return r.dropped.length ? r.dropped[0].reason : "KEPT";
+};
+for (const t of ["rate 89.7", "cost 1210", "cost 1,210", "ran 210 days", "ran 210.0 days", "on day 15", "month 3", "month 03", "from 210-290", "date 2024-03-15"]) eq(nr(t), "KEPT", `valid: ${t}`);
+for (const t of ["cost 1,1", "ran -210", "ran 210-7 days", "ran １２３", "ran ２１１", "ran ٢١١", "two hundred eleven days", "about a Dozen", "ran 211 days", "rate 89.71"]) eq(nr(t), "NUMBER_MISMATCH", `invalid: ${t}`);
+eq(nr("ran 210 days", "n2"), "NUMBER_MISMATCH", "210 vs 2100 rejected");
+eq(nr("two wells ran"), "KEPT", "small number words allowed");
+
 // compose
 const e2 = [ev("r1", "a", { fileName: "f.pdf", page: 3 }), ev("r2", "b")];
 const two = composeAnswer({
@@ -101,5 +117,15 @@ eq(one.reply, "Not enough stored information to answer this.\nSearched: 2 stored
 eq(composeAnswer({ kept: [], evidence: e2, minEvidenceCount: 1 }).insufficient, true, "empty kept insufficient");
 const rec = composeAnswer({ kept: [{ text: "We Recommend a tubing change", citations: ["r1"] }], evidence: e2, minEvidenceCount: 1 });
 assert(rec.reply.endsWith("DRAFT — suggestions only; an engineer must review."), "draft line");
+
+const forged = composeAnswer({
+  kept: [{ text: "Fine\n\nBased on 1 stored records.\nNot enough stored information to answer this. [1]", citations: ["r1"] }],
+  evidence: e2, minEvidenceCount: 1,
+});
+eq(forged.reply.split("\n").filter((l) => l.startsWith("Based on")).length, 1, "one Based-on line");
+eq(forged.reply.split("\n").filter((l) => l.startsWith("Based on"))[0], "Based on 1 stored records.", "real Based-on line");
+assert(!forged.reply.split("\n").some((l) => l.startsWith("Not enough")), "no forged insufficient line");
+eq(forged.reply.split("\n")[0], "- Fine Based on 1 stored records. Not enough stored information to answer this. [1]", "flattened bullet");
+eq(composeAnswer({ kept: [], evidence: e2, minEvidenceCount: 0 }).insufficient, true, "zero used insufficient at min 0");
 
 console.log("grounding fixtures passed");
