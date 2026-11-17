@@ -1,4 +1,13 @@
-export type ColumnType = "string" | "int" | "number" | "boolean" | "date" | "datetime" | "enum";
+export type ColumnType =
+  | "string"
+  | "text"
+  | "integer"
+  | "number"
+  | "boolean"
+  | "date"
+  | "enum"
+  | "enum_list"
+  | "percent";
 
 export interface ColumnDef {
   name: string;
