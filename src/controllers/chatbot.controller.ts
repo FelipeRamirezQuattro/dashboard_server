@@ -22,7 +22,6 @@ export const sendMessage = async (req: Request, res: Response) => {
     }
 
     const userId = req.user?.id || "anonymous";
-    const userRole = req.user?.role || "viewer";
     const effectiveSessionId = sessionId || `default-${userId}`;
 
     logger.info(
@@ -178,7 +177,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       message,
       userId,
       userEmail,
-      userRole,
+      userRole: req.user?.role,
       sessionId: effectiveSessionId,
       target,
       workflowBrainCategoryId,

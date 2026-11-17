@@ -3,7 +3,7 @@ import { env } from "../config/env";
 import { requireCategoryState } from "./workflowBrainState.service";
 import logger from "../utils/logger";
 import { normalize, tokensFor } from "./brain/text";
-import { BrainAccessError, CategoryAccessRole, roleMeets } from "./brain/access";
+import { BrainAccessError, effectiveAccessRole, roleMeets } from "./brain/access";
 import type { UserRole } from "../models/User.model";
 
 const summarizeItems = (items: unknown[], limit: number): unknown[] =>
@@ -132,10 +132,10 @@ class WorkflowBrainChatService {
     const category = state.category as {
       name?: string;
       description?: string;
-      accessRole?: CategoryAccessRole;
+      accessRole?: string | null;
     };
-    // Fail closed: a category without a readable accessRole is treated as admin-only.
-    if (!roleMeets(user.role, category.accessRole ?? "admin")) {
+    // Legacy categories (no accessRole) are viewer-level; unknown values fail closed to admin.
+    if (!roleMeets(user.role, effectiveAccessRole(category))) {
       throw new BrainAccessError();
     }
     const categoryName = category.name || "Selected Workflow Brain category";

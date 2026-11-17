@@ -1,10 +1,10 @@
 import type { UserRole } from "../../models/User.model";
-import { CategoryAccessRole, roleMeets } from "./access";
+import { effectiveAccessRole, roleMeets } from "./access";
 
 export type CategoryAccessDecision = "ok" | "not_found" | "forbidden";
 
 interface AccessCategory {
-  accessRole: CategoryAccessRole;
+  accessRole?: string | null;
   isActive?: boolean;
 }
 
@@ -14,10 +14,10 @@ export const decideCategoryAccess = (
   category: AccessCategory | null | undefined,
 ): CategoryAccessDecision => {
   if (!category || category.isActive === false) return "not_found";
-  return roleMeets(role, category.accessRole) ? "ok" : "forbidden";
+  return roleMeets(role, effectiveAccessRole(category)) ? "ok" : "forbidden";
 };
 
-export const filterReadableCategories = <T extends { accessRole: CategoryAccessRole }>(
+export const filterReadableCategories = <T extends { accessRole?: string | null }>(
   role: UserRole,
   categories: T[],
-): T[] => categories.filter((category) => roleMeets(role, category.accessRole));
+): T[] => categories.filter((category) => roleMeets(role, effectiveAccessRole(category)));

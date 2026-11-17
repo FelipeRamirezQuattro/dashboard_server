@@ -2,6 +2,9 @@
 import {
   BrainAccessError,
   canChangeCategorySettings,
+  effectiveAccessRole,
+  effectiveGroundingMode,
+  effectiveMinEvidenceCount,
   roleMeets,
 } from "../../services/brain/access";
 
@@ -47,5 +50,27 @@ const err = new BrainAccessError("nope");
 assert(err instanceof Error, "BrainAccessError must be an Error");
 assert(err.status === 403, "BrainAccessError status must be 403");
 assert(err.message === "nope", "BrainAccessError keeps message");
+
+assert(effectiveAccessRole({}) === "viewer", "missing accessRole => viewer");
+assert(effectiveAccessRole({ accessRole: null }) === "viewer", "null accessRole => viewer");
+assert(effectiveAccessRole({ accessRole: undefined }) === "viewer", "undefined accessRole => viewer");
+assert(effectiveAccessRole({ accessRole: "owner" }) === "admin", "unknown string fails closed to admin");
+assert(effectiveAccessRole({ accessRole: "" }) === "admin", "empty string fails closed to admin");
+assert(effectiveAccessRole({ accessRole: 5 as never }) === "admin", "non-string fails closed to admin");
+for (const r of ["viewer", "editor", "admin"] as const) {
+  assert(effectiveAccessRole({ accessRole: r }) === r, `valid ${r} kept`);
+}
+assert(effectiveGroundingMode({}) === "standard", "missing grounding => standard");
+assert(effectiveGroundingMode({ groundingMode: null }) === "standard", "null grounding => standard");
+assert(effectiveGroundingMode({ groundingMode: "strict" }) === "strict", "strict kept");
+assert(effectiveGroundingMode({ groundingMode: "weird" }) === "standard", "unknown grounding => standard");
+assert(effectiveMinEvidenceCount({}) === 2, "missing min => 2");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: null }) === 2, "null min => 2");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: Number.NaN }) === 2, "NaN min => 2");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: "3" as never }) === 2, "non-number min => 2");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: 0 }) === 1, "clamp low to 1");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: 99 }) === 10, "clamp high to 10");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: 4.7 }) === 4, "floored");
+assert(effectiveMinEvidenceCount({ minEvidenceCount: 5 }) === 5, "valid kept");
 
 console.log("access fixtures passed");

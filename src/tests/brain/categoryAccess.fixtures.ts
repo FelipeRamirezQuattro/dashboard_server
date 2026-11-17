@@ -32,4 +32,21 @@ assert(names("viewer" as never) === "a", "viewer sees only viewer-level");
 assert(names("editor" as never) === "ab", "editor sees viewer+editor");
 assert(names("admin" as never) === "abc", "admin sees all");
 assert(names("bogus" as never) === "", "unknown role sees nothing");
+for (const role of ["viewer", "editor", "admin", "superadmin"] as const) {
+  assert(decideCategoryAccess(role, { isActive: true } as never) === "ok", `${role} reads legacy (missing accessRole)`);
+  assert(
+    decideCategoryAccess(role, { accessRole: null, isActive: true } as never) === "ok",
+    `${role} reads legacy (null accessRole)`,
+  );
+}
+assert(decideCategoryAccess("superadmin", { isActive: true } as never) === "ok", "superadmin legacy ok");
+for (const role of ["viewer", "editor"] as const) {
+  assert(decideCategoryAccess(role, { accessRole: "owner", isActive: true } as never) === "forbidden", `${role} vs unknown => forbidden`);
+}
+assert(decideCategoryAccess("admin", { accessRole: "owner", isActive: true } as never) === "ok", "admin vs unknown ok");
+const mixed = [{ name: "legacy" }, { name: "e", accessRole: "editor" }, { name: "u", accessRole: "owner" }] as never[];
+const mnames = (role: never) => (filterReadableCategories(role, mixed) as { name: string }[]).map((c) => c.name).join(",");
+assert(mnames("viewer" as never) === "legacy", "viewer sees legacy only");
+assert(mnames("editor" as never) === "legacy,e", "editor sees legacy+editor");
+assert(mnames("admin" as never) === "legacy,e,u", "admin sees all incl. unknown");
 console.log("categoryAccess fixtures OK");

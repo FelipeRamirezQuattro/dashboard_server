@@ -12,6 +12,26 @@ export class BrainAccessError extends Error {
   }
 }
 
+/**
+ * Single place where legacy/missing category settings are interpreted. Anything reading a category
+ * via .lean() (no schema defaults) MUST go through these helpers.
+ * Missing/null accessRole (pre-feature categories) => "viewer"; an unknown value fails closed to "admin".
+ */
+export const effectiveAccessRole = (c: { accessRole?: string | null }): CategoryAccessRole => {
+  const value = c?.accessRole;
+  if (value === undefined || value === null) return "viewer";
+  return value === "viewer" || value === "editor" || value === "admin" ? value : "admin";
+};
+
+export const effectiveGroundingMode = (c: { groundingMode?: string | null }): "strict" | "standard" =>
+  c?.groundingMode === "strict" ? "strict" : "standard";
+
+export const effectiveMinEvidenceCount = (c: { minEvidenceCount?: number | null }): number => {
+  const value = c?.minEvidenceCount;
+  if (typeof value !== "number" || !Number.isFinite(value)) return 2;
+  return Math.min(10, Math.max(1, Math.floor(value)));
+};
+
 export const roleMeets = (userRole: UserRole, minRole: CategoryAccessRole): boolean =>
   (roleHierarchy[userRole] ?? 0) >= roleHierarchy[minRole];
 

@@ -63,7 +63,7 @@ export const requireCategoryAccess = (source: CategoryAccessSource) => {
         .lean();
       const decision = decideCategoryAccess(
         req.user.role,
-        category as { accessRole: "viewer" | "editor" | "admin"; isActive?: boolean } | null,
+        category as { accessRole?: string | null; isActive?: boolean } | null,
       );
       if (decision === "not_found") {
         notFound(res);
