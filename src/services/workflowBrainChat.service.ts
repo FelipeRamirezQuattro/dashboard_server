@@ -3,7 +3,15 @@ import { env } from "../config/env";
 import { requireCategoryState } from "./workflowBrainState.service";
 import logger from "../utils/logger";
 import { normalize, tokensFor } from "./brain/text";
-import { BrainAccessError, effectiveAccessRole, roleMeets } from "./brain/access";
+import {
+  BrainAccessError,
+  effectiveAccessRole,
+  effectiveGroundingMode,
+  effectiveMinEvidenceCount,
+  roleMeets,
+} from "./brain/access";
+import { answerGrounded } from "./brain/groundedAnswer.service";
+import type { Citation } from "./brain/types";
 import type { UserRole } from "../models/User.model";
 
 const summarizeItems = (items: unknown[], limit: number): unknown[] =>
@@ -114,6 +122,10 @@ const answerFromMemory = (
     .join("\n");
 };
 
+/** Strict categories answer only from cited stored evidence; legacy/missing settings mean standard. */
+export const shouldUseGrounding = (category: { groundingMode?: string | null }): boolean =>
+  effectiveGroundingMode(category) === "strict";
+
 class WorkflowBrainChatService {
   private openai?: OpenAI;
 
@@ -127,18 +139,41 @@ class WorkflowBrainChatService {
     categoryId: string,
     question: string,
     user: { id: string; role: UserRole },
-  ): Promise<{ answer: string; categoryName: string; usedAi: boolean }> {
+  ): Promise<{
+    answer: string;
+    categoryName: string;
+    usedAi: boolean;
+    citations?: Citation[];
+    insufficient?: boolean;
+  }> {
     const state = await requireCategoryState(categoryId);
     const category = state.category as {
       name?: string;
       description?: string;
       accessRole?: string | null;
+      groundingMode?: string | null;
+      minEvidenceCount?: number | null;
     };
     // Legacy categories (no accessRole) are viewer-level; unknown values fail closed to admin.
     if (!roleMeets(user.role, effectiveAccessRole(category))) {
       throw new BrainAccessError();
     }
     const categoryName = category.name || "Selected Workflow Brain category";
+    if (shouldUseGrounding(category)) {
+      // strict: grounded path only (no memory/fallback answers); logs carry ids and counts only
+      const grounded = await answerGrounded({
+        category: { _id: categoryId, name: categoryName, minEvidenceCount: effectiveMinEvidenceCount(category) },
+        question,
+        userId: user.id,
+      });
+      return {
+        answer: grounded.reply,
+        categoryName,
+        usedAi: true,
+        citations: grounded.citations,
+        insufficient: grounded.insufficient,
+      };
+    }
     logger.info(
       `[WorkflowBrainDebug][brain:start] categoryId=${categoryId} categoryName="${categoryName}" memoryCount=${state.memories.length} workflowStepCount=${state.workflowSteps.length} question="${question.slice(0, 160)}"`,
     );

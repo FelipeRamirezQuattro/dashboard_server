@@ -37,6 +37,7 @@ export interface ChatResponse {
     | "error";
   routedTo?: string;
   documents?: ChatDocumentResult[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChatDocumentResult {
