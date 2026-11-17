@@ -10,10 +10,13 @@ export const buildChunkEmbeddingText = (heading: string | undefined | null, cont
 
 /** True when the item has no usable embedding or it was made by a different model/version. */
 export const needsReembedding = (
-  item: { embeddingModel?: string; embeddingVersion?: string; embedding?: unknown },
+  item: { embeddingModel?: string; embeddingVersion?: string; embedding?: unknown; embeddedAt?: unknown },
   provider: { model: string; version: string },
 ): boolean => {
-  if (!Array.isArray(item.embedding) || item.embedding.length === 0) return true;
+  // Writes set embedding/model/version/embeddedAt together, so embeddedAt present means a vector exists
+  // (lets callers avoid loading vectors just for the currency check).
+  const hasVector = (Array.isArray(item.embedding) && item.embedding.length > 0) || !!item.embeddedAt;
+  if (!hasVector) return true;
   return item.embeddingModel !== provider.model || item.embeddingVersion !== provider.version;
 };
 
@@ -34,25 +37,68 @@ export const rebuildCardsFromActiveRecords = (
   return buildRecordCards(def, rows).map((c) => ({ primaryKeyValue: c.primaryKeyValue, text: c.text }));
 };
 
-/** In-memory guard: one concurrent job per key. */
+/**
+ * In-memory guard: one concurrent job per key. A tryAcquire that fails marks the key dirty;
+ * release() reports whether a rerun is needed (any number of misses => exactly one rerun).
+ */
 export const createJobGuard = () => {
   const running = new Set<string>();
+  const dirty = new Set<string>();
   return {
     tryAcquire(key: string): boolean {
-      if (running.has(key)) return false;
+      if (running.has(key)) {
+        dirty.add(key);
+        return false;
+      }
       running.add(key);
       return true;
     },
-    release(key: string): void {
+    /** @returns true when calls arrived while running (caller should re-run once). */
+    release(key: string): boolean {
       running.delete(key);
+      return dirty.delete(key);
     },
   };
+};
+
+/** Runs at most `max` tasks at once; a throwing task never wedges the queue. */
+export const createLimiter = (max: number) => {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const next = (): void => {
+    if (active >= max) return;
+    const start = waiting.shift();
+    if (start) start();
+  };
+  return <T>(task: () => Promise<T>): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const start = (): void => {
+        active++;
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            active--;
+            next();
+          });
+      };
+      waiting.push(start);
+      next();
+    });
+};
+
+/** Decides what a dataset job does given its (possibly missing) definition. */
+export const resolveDatasetJobOutcome = (
+  def: DatasetDefinition | null | undefined,
+): "failed" | "skip_done" | "embed" => {
+  if (!def) return "failed";
+  if (!def.card) return "skip_done";
+  return "embed";
 };
 
 export interface EmbeddingJobItem {
   id: string;
   text: string;
-  current?: { embeddingModel?: string; embeddingVersion?: string; embedding?: unknown };
+  current?: { embeddingModel?: string; embeddingVersion?: string; embedding?: unknown; embeddedAt?: unknown };
 }
 export interface EmbeddingWrite {
   id: string;

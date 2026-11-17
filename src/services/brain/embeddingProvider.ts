@@ -20,6 +20,12 @@ export const MAX_EMBEDDING_INPUT_CHARS = 8000;
 export const truncateForEmbedding = (text: string): string =>
   text.length > MAX_EMBEDDING_INPUT_CHARS ? text.slice(0, MAX_EMBEDDING_INPUT_CHARS) : text;
 
+export const EMPTY_TEXT_PLACEHOLDER = "(empty)";
+
+/** Truncates and replaces empty/whitespace-only texts so counts and order are preserved. */
+export const prepareEmbeddingInputs = (texts: string[]): string[] =>
+  texts.map((t) => (t.trim() === "" ? EMPTY_TEXT_PLACEHOLDER : truncateForEmbedding(t)));
+
 export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   model: string;
   version: string;
@@ -28,14 +34,14 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   constructor(opts: { apiKey: string; model: string; version: string }) {
     this.model = opts.model;
     this.version = opts.version;
-    this.client = new OpenAI({ apiKey: opts.apiKey });
+    this.client = new OpenAI({ apiKey: opts.apiKey, timeout: 60_000, maxRetries: 2 });
   }
 
   async embed(texts: string[]): Promise<number[][]> {
     try {
       const res = await this.client.embeddings.create({
         model: this.model,
-        input: texts.map(truncateForEmbedding),
+        input: prepareEmbeddingInputs(texts),
       });
       const data = [...res.data].sort((a, b) => a.index - b.index);
       return data.map((d) => d.embedding);

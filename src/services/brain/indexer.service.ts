@@ -13,6 +13,8 @@ import {
   EmbeddingJobItem,
   buildChunkEmbeddingText,
   createJobGuard,
+  createLimiter,
+  resolveDatasetJobOutcome,
   rebuildCardsFromActiveRecords,
   runEmbeddingJob,
   selectActiveRecords,
@@ -35,13 +37,36 @@ const logFail = (kind: string, id: string, errorName: string): void => {
 
 type Status = "pending" | "done" | "failed";
 
-const runGuarded = (key: string, kind: string, id: string, job: () => Promise<void>): void => {
-  setImmediate(() => {
-    if (!guard.tryAcquire(key)) return;
-    job()
-      .catch((e: unknown) => logFail(kind, id, e instanceof Error ? e.name : "Error"))
-      .finally(() => guard.release(key));
-  });
+const limit = createLimiter(2);
+type JobFn = (force: boolean) => Promise<void>;
+const queued = new Map<string, { force: boolean; jobs: JobFn[] }>();
+
+/** Guarded, concurrency-limited run. Calls arriving mid-run are remembered and re-run once afterwards. */
+const startGuarded = (key: string, kind: string, id: string, force: boolean, job: JobFn): void => {
+  if (!guard.tryAcquire(key)) {
+    const q = queued.get(key) ?? { force: false, jobs: [] };
+    q.force = q.force || force;
+    q.jobs.push(job);
+    queued.set(key, q);
+    return;
+  }
+  limit(() => job(force))
+    .catch((e: unknown) => logFail(kind, id, e instanceof Error ? e.name : "Error"))
+    .finally(() => {
+      if (!guard.release(key)) return;
+      const q = queued.get(key);
+      queued.delete(key);
+      if (!q) return;
+      const [first, ...rest] = q.jobs;
+      startGuarded(key, kind, id, q.force, async (f) => {
+        await first(f);
+        for (const j of rest) await j(false);
+      });
+    });
+};
+
+const runGuarded = (key: string, kind: string, id: string, force: boolean, job: JobFn): void => {
+  setImmediate(() => startGuarded(key, kind, id, force, job));
 };
 
 // ------------------------------------------------------------------ documents
@@ -49,17 +74,19 @@ const runGuarded = (key: string, kind: string, id: string, job: () => Promise<vo
 const runDocumentJob = async (documentId: string, force: boolean): Promise<void> => {
   const doc = await BrainDocument.findById(documentId).select("status").lean();
   if (!doc || doc.status !== "active") return; // chunks carry no status of their own: parent must be active
-  const setStatus = (s: Status) => BrainDocument.updateOne({ _id: doc._id }, { $set: { embeddingStatus: s } });
-  await setStatus("pending");
+  await BrainDocument.updateOne({ _id: doc._id }, { $set: { embeddingStatus: "pending" } });
+  // a stale run must not overwrite a newer state: only finish what this run started
+  const setStatus = (s: Status) =>
+    BrainDocument.updateOne({ _id: doc._id, embeddingStatus: "pending" }, { $set: { embeddingStatus: s } });
   try {
     const provider = getEmbeddingProvider();
     const chunks = await BrainMemory.find({ documentId: doc._id, type: "document_chunk" })
-      .select("+embedding heading content embeddingModel embeddingVersion")
+      .select("heading content embeddingModel embeddingVersion embeddedAt")
       .lean();
     const items: EmbeddingJobItem[] = chunks.map((c) => ({
       id: String(c._id),
       text: buildChunkEmbeddingText(c.heading, c.content),
-      current: c,
+      current: force ? undefined : c,
     }));
     const result = await runEmbeddingJob({
       items,
@@ -93,7 +120,7 @@ const runDocumentJob = async (documentId: string, force: boolean): Promise<void>
 
 export const scheduleDocumentEmbedding = (documentId: string, opts: ScheduleOptions = {}): void => {
   try {
-    runGuarded(`doc:${documentId}`, "document", documentId, () => runDocumentJob(documentId, !!opts.force));
+    runGuarded(`doc:${documentId}`, "document", documentId, !!opts.force, (f) => runDocumentJob(documentId, f));
   } catch {
     /* fire-and-forget: never throws */
   }
@@ -115,10 +142,15 @@ const embedDataset = async (
   force: boolean,
 ): Promise<"done" | "failed"> => {
   const def = await loadDefinition(categoryId, datasetKey);
-  if (!def || !def.card) return "done"; // nothing to embed for this dataset
+  const outcome = resolveDatasetJobOutcome(def);
+  if (outcome === "failed") {
+    logger.warn(`brain embedding job failed kind=dataset id=${categoryId} datasetKey=${datasetKey} error=MissingDefinition`);
+    return "failed";
+  }
+  if (outcome === "skip_done" || !def || !def.card) return "done"; // no card: nothing to embed
   const rootTable = def.card.rootTable;
   const all = await BrainDatasetRecord.find({ categoryId: oid(categoryId), datasetKey, status: "active" })
-    .select("+embedding table primaryKeyValue data cardText embeddingModel embeddingVersion")
+    .select("table primaryKeyValue data cardText embeddingModel embeddingVersion embeddedAt")
     .lean();
   const active = selectActiveRecords(all);
   const cards = rebuildCardsFromActiveRecords(def, active);
@@ -131,7 +163,7 @@ const embedDataset = async (
     const id = String(root._id);
     idByCard.set(id, { id, text: c.text });
     // a changed card text invalidates the stored embedding even when model/version match
-    items.push({ id, text: c.text, current: root.cardText === c.text ? root : undefined });
+    items.push({ id, text: c.text, current: !force && root.cardText === c.text ? root : undefined });
   }
   const result = await runEmbeddingJob({
     items,
@@ -163,8 +195,9 @@ const embedDataset = async (
 const runBatchJob = async (batchId: string, force: boolean): Promise<void> => {
   const batch = await BrainImportBatch.findById(batchId).select("status categoryId datasetKey").lean();
   if (!batch || batch.status !== "committed") return;
-  const setStatus = (s: Status) => BrainImportBatch.updateOne({ _id: batch._id }, { $set: { embeddingStatus: s } });
-  await setStatus("pending");
+  await BrainImportBatch.updateOne({ _id: batch._id }, { $set: { embeddingStatus: "pending" } });
+  const setStatus = (s: Status) =>
+    BrainImportBatch.updateOne({ _id: batch._id, embeddingStatus: "pending" }, { $set: { embeddingStatus: s } });
   try {
     const status = await embedDataset(String(batch.categoryId), batch.datasetKey, getEmbeddingProvider(), force);
     await setStatus(status);
@@ -176,7 +209,17 @@ const runBatchJob = async (batchId: string, force: boolean): Promise<void> => {
 
 export const scheduleBatchEmbedding = (batchId: string, opts: ScheduleOptions = {}): void => {
   try {
-    runGuarded(`batch:${batchId}`, "batch", batchId, () => runBatchJob(batchId, !!opts.force));
+    setImmediate(async () => {
+      try {
+        const b = await BrainImportBatch.findById(batchId).select("categoryId datasetKey").lean();
+        if (!b) return;
+        // dataset-level job: one at a time per (category, dataset)
+        const key = `ds:${String(b.categoryId)}/${b.datasetKey}`;
+        startGuarded(key, "batch", batchId, !!opts.force, (f) => runBatchJob(batchId, f));
+      } catch (e) {
+        logFail("batch", batchId, e instanceof Error ? e.name : "Error");
+      }
+    });
   } catch {
     /* fire-and-forget: never throws */
   }

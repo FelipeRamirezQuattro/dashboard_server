@@ -4,10 +4,12 @@ import path from "path";
 import { validateDataset } from "../../services/brain/datasetValidator";
 import { rodPumpFailureDefinition as def } from "../../services/brain/definitions/rodPumpFailure";
 import { buildRecordCards } from "../../services/brain/recordCards";
-import { EmbeddingError, EmbeddingProvider, embedInBatches, truncateForEmbedding } from "../../services/brain/embeddingProvider";
+import { EmbeddingError, EmbeddingProvider, embedInBatches, prepareEmbeddingInputs, truncateForEmbedding } from "../../services/brain/embeddingProvider";
 import {
   buildChunkEmbeddingText,
   createJobGuard,
+  createLimiter,
+  resolveDatasetJobOutcome,
   needsReembedding,
   rebuildCardsFromActiveRecords,
   runEmbeddingJob,
@@ -96,6 +98,9 @@ test("needsReembedding matrix", () => {
   assert(needsReembedding({ embedding: emb, embeddingModel: "x", embeddingVersion: "1" }, prov), "model differs");
   assert(needsReembedding({ embedding: emb, embeddingModel: "m", embeddingVersion: "2" }, prov), "version differs");
   assert(!needsReembedding({ embedding: emb, embeddingModel: "m", embeddingVersion: "1" }, prov), "current");
+  assert(!needsReembedding({ embeddedAt: new Date(), embeddingModel: "m", embeddingVersion: "1" }, prov), "embeddedAt implies vector");
+  assert(needsReembedding({ embeddedAt: new Date(), embeddingModel: "m", embeddingVersion: "2" }, prov), "embeddedAt but version differs");
+  assert(needsReembedding({ embeddingModel: "m", embeddingVersion: "1" }, prov), "no vector, no embeddedAt");
 });
 
 const dir = path.resolve(__dirname, "../../../../docs/rod-pump-failure-sample-data");
@@ -167,6 +172,49 @@ test("job guard prevents re-entrancy", () => {
   assert(g.tryAcquire("batch:1"), "other key ok");
   g.release("doc:1");
   assert(g.tryAcquire("doc:1"), "after release");
+});
+
+test("prepareEmbeddingInputs: truncates, replaces empty, keeps count/order", () => {
+  const out = prepareEmbeddingInputs(["a", "", "   \n", "b".repeat(9000)]);
+  assert(out.length === 4 && out[0] === "a", "count/order");
+  assert(out[1] === "(empty)" && out[2] === "(empty)", "empty replaced");
+  assert(out[3].length === 8000, "truncated");
+});
+
+test("resolveDatasetJobOutcome", () => {
+  assert(resolveDatasetJobOutcome(null) === "failed", "null");
+  assert(resolveDatasetJobOutcome(undefined) === "failed", "undefined");
+  assert(resolveDatasetJobOutcome({ ...def, card: undefined }) === "skip_done", "no card");
+  assert(resolveDatasetJobOutcome(def) === "embed", "card");
+});
+
+test("guard: running + 2 more calls => exactly one rerun", () => {
+  const g = createJobGuard();
+  assert(g.tryAcquire("k"), "acquire");
+  assert(!g.tryAcquire("k") && !g.tryAcquire("k"), "two misses");
+  assert(g.release("k") === true, "rerun needed");
+  assert(g.tryAcquire("k"), "rerun acquires");
+  assert(g.release("k") === false, "no further rerun");
+});
+
+test("limiter: never more than max running, all complete, throw does not wedge", async () => {
+  const lim = createLimiter(2);
+  let active = 0;
+  let peak = 0;
+  const done: number[] = [];
+  const task = (i: number) => async () => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((r) => setTimeout(r, 5));
+    active--;
+    if (i === 3) throw new Error("boom");
+    done.push(i);
+    return i;
+  };
+  const results = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => lim(task(i))));
+  assert(peak === 2, `peak ${peak}`);
+  assert(done.length === 7, "7 succeeded");
+  assert(results[3].status === "rejected" && results.filter((r) => r.status === "fulfilled").length === 7, "one rejected, rest ok");
 });
 
 (async () => {
