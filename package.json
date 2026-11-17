@@ -11,7 +11,9 @@
     "seed:hierarchy": "ts-node src/seeds/seedHierarchy.ts",
     "lint": "eslint src --ext .ts",
     "test:brain": "ts-node src/tests/brain/run.ts",
-    "brain:rodpump": "ts-node src/scripts/registerRodPumpBrain.ts"
+    "brain:rodpump": "ts-node src/scripts/registerRodPumpBrain.ts",
+    "brain:grounding-live": "ts-node src/scripts/groundingLiveCheck.ts",
+    "brain:grounding-dry": "ts-node src/scripts/groundingLiveCheck.ts --dry"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
