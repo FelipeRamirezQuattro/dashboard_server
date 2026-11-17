@@ -162,6 +162,11 @@ const validateTable = (table: TableDef, text: string, issues: RowIssue[]): Table
   return state;
 };
 
+const sourceLines = new WeakMap<object, number>();
+
+/** 1-based CSV file line an accepted row came from (header = line 1). Not stored on the row. */
+export const getSourceLine = (row: Record<string, unknown>): number | undefined => sourceLines.get(row);
+
 export const validateDataset = (def: DatasetDefinition, files: Record<string, string>): ImportReport => {
   const issues: RowIssue[] = [];
   const states = new Map<string, TableState>();
@@ -232,6 +237,7 @@ export const validateDataset = (def: DatasetDefinition, files: Record<string, st
   for (const state of states.values()) {
     const dropped = rowsByLine.get(state.table.name) ?? new Set<number>();
     const accepted = state.candidates.filter((c) => !dropped.has(c.line)).map((c) => c.row);
+    for (const c of state.candidates) sourceLines.set(c.row, c.line);
     rows[state.table.name] = accepted;
     report.files[state.table.file] = {
       rowsRead: state.rowsRead,
