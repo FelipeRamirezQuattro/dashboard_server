@@ -100,7 +100,7 @@ test("empty values skipped, booleans and lists rendered", () => {
   const t = card("DEMO-001").text;
   assert(!/=(;|$)/m.test(t) && !t.includes("=undefined") && !t.includes("=null"), "no empty pairs");
   assert(/is_primary_failure=true/.test(t) && /is_primary_failure=false/.test(t), "booleans");
-  assert(t.includes("primary_failure_mechanism=wear,seal_loss_vacuum_fail"), "list joined with commas");
+  assert(t.includes("primary_failure_mechanism=wear, seal_loss_vacuum_fail"), "list joined with comma+space");
 });
 
 test("no card definition yields no cards", () => {

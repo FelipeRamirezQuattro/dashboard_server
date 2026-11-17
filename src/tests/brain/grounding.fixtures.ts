@@ -111,6 +111,25 @@ const cases: [string, string, string][] = [
   ["delta=-210", "delta was 210", D], ["temp=-40", "temp -40", "KEPT"], ["temp=210", "temp \u2212210", D],
   ["temp=-210", "temp \u2212210", "KEPT"], ["eff=5", "eff .5", D], ["eff=0.5", "eff .5", "KEPT"],
   ["x=0", "x -0", "KEPT"], ["x=210", "x 2.1e2", D], ["x=2", "2k feet", D], ["x=1.2", "1.2M", D],
+  // problem 1/b/c: sign after any non-alphanumeric, dash-like glyphs
+  ...["delta **-210**", "delta `-210`", 'q "-210"', "q '-210'", "x/-210", "{-210}", "<-210>", "|-210|", "~-210", "_-210_", "x,-210",
+    "t \uFF0D210", "t \uFE63210", "t \u2796210", "t \u2010210", "t \u2011210", "t \u2014210", "t \u2212210"]
+    .map((t): [string, string, string] => ["delta=210", t, D]),
+  ["delta=-210", "delta `-210`", "KEPT"], ["delta=-210", "delta \u2212210", "KEPT"], ["delta=-210", "delta 210", D],
+  ["DEMO-001 days_run=210", "DEMO-001 ran 210 days", "KEPT"], ["d=2024-03-15", "on 2024-03-15", "KEPT"],
+  ["a=210 b=290", "range 210\u2013290", "KEPT"], ["a=210 b=290", "range 210-290", "KEPT"],
+  // problem 2/d: magnitude suffixes and exponents
+  ...["1.2bn", "1.2 B", "2 k feet", "3MM", "1.2Mbbl", "1.2T", "10^3", "1.2 MMbbl", "2.1E+2"].map((t): [string, string, string] => ["x=1.2 y=2 z=3 w=10 v=210", `n ${t}`, D]),
+  ["wear=6, 7", "wear 6 and 7 mil", "KEPT"], ["wear=6", "wear 6mil", "KEPT"], ["x=2", "2 ft deep", "KEPT"],
+  ["id=v2k", "id v2k", "KEPT"], ["id=id3e4f", "id id3e4f", "KEPT"],
+  // problem 3/e: number-word prefixes
+  ...["onehundred wells", "twothousand", "a trillion", "Hundredth", "twenty-one"].map((t): [string, string, string] => ["x=1 y=2", t, D]),
+  ["x=1", "weighty rods", "KEPT"],
+  // problem 4/a: invisible characters
+  ...["2\u200B10", "2\u200D10", "2\u206010", "2\uFEFF10", "2\u00AD10", "2\u030110"].map((t): [string, string, string] => ["a 2 b 10", t, D]),
+  ["a 2 b 10", "2 and 10", "KEPT"], ["a 2\u200B10", "210", "KEPT"], ["x=1", "\u00BD", D], ["x=1 y=2", "\u00B2", D],
+  // array rendering
+  ["ids 1, 210", "1210 comps", D], ["ids 1, 210", "1 and 210", "KEPT"],
   ["x=1", "hundreds of wells", D], ["x=1", "thousands", D], ["x=1", "seventyfold", D], ["x=1", "Hundredth", D],
   ["x=21", "twenty-one", D], ["x=2", "two wells", "KEPT"],
 ];

@@ -12,7 +12,7 @@ const isEmpty = (v: unknown): boolean =>
   v === undefined || v === null || (typeof v === "string" && v.trim() === "") || (Array.isArray(v) && v.length === 0);
 
 const render = (v: unknown): string => {
-  if (Array.isArray(v)) return v.map((x) => String(x)).join(",");
+  if (Array.isArray(v)) return v.map((x) => String(x)).join(", "); // comma+space so [1,210] cannot read as grouped 1,210
   // Keep each row on one line: fold any line breaks inside a value into single spaces.
   return String(v).replace(/\s*[\r\n]+\s*/g, " ").trim();
 };

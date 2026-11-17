@@ -13,17 +13,23 @@ export type DropReason = "NO_CITATION" | "UNKNOWN_CITATION" | "GUIDANCE_CITATION
 
 const MAX_STATEMENTS = 30;
 const MAX_STATEMENT_CHARS = 2000;
-// A "-" is a sign only at the start or after whitespace or one of ( = : ; [ (evidence renders col=value).
-// Thousands grouping needs exact 3-digit groups ("1,210" => 1210); anything else splits ("1,2,3" => 1,2,3).
-// Unicode minus/dashes are folded to "-" first; leading-dot decimals (".5") are numbers (0.5).
-const NUMBER_RE = /(?:(?<=^|[\s(=:;\[])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)/g;
-const NON_ASCII_DIGIT_RE = /(?![0-9])\p{Nd}/u;
-// Scientific notation and magnitude suffixes (2.1e2, 2k, 1.2M) cannot be verified token-wise: rejected.
-const SCI_OR_SUFFIX_RE = /\d[eE][+-]?\d|\d[kKmMbB]\b/;
-// Large number words (and any suffix such as "hundreds", "seventyfold") are rejected. Small words (one, two,
-// eleven, ...) are intentionally allowed: this gate checks numeric tokens only, and a matching token may come
-// from any part of the cited text, not a specific field.
-const NUMBER_WORD_RE = /\b(?:hundred|thousand|million|billion|dozen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\w*/i;
+// Signs: after folding every dash-like glyph to "-", a "-" is a sign unless it directly follows a letter or digit
+// (so DEMO-001, 2024-03-15 and 210-290 stay separators). Thousands grouping needs exact 3-digit groups
+// ("1,210" => 1210); anything else splits ("1,2,3" => 1,2,3). Leading-dot decimals (".5") are numbers (0.5).
+const NUMBER_RE = /(?:(?<![\p{L}\p{N}])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)/gu;
+// Any non-ASCII numeric character (fullwidth, Arabic-Indic, superscripts, fractions, roman numerals) is rejected.
+const NON_ASCII_NUMERIC_RE = /(?![0-9])\p{N}/u;
+const INVISIBLE_RE = /[\p{Cf}\p{M}]/gu;
+// Exponents and magnitude suffixes cannot be verified token-wise: rejected. The number must not be glued to a
+// preceding letter (v2k, id3e4f are identifiers). "mil" and "ft" are deliberately not suffixes here.
+const MAGNITUDE_RE = new RegExp(
+  "(?<![\\p{L}\\d])(?<!\\d,)\\d[\\d,]*(?:\\.\\d+)?(?:[eE][+-]?\\d|\\^|\\s?(?:mm|bn|tn|k|m|b|t|(?:mm|m|k)bbl)(?![\\p{L}\\p{N}]))",
+  "iu"
+);
+// Large number words are rejected wherever they occur in a word ("onehundred", "hundreds"); the tens words need a
+// leading word boundary so "weighty" is fine. Small words (one, two, eleven, ...) are intentionally allowed: this
+// gate checks numeric tokens only, and a matching token may come from any part of the cited text, not a field.
+const NUMBER_WORD_RE = /(?:hundred|thousand|million|billion|trillion|dozen)|\b(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)/i;
 
 const normalizeNumber = (token: string): string => {
   const neg = token.startsWith("-");
@@ -34,8 +40,13 @@ const normalizeNumber = (token: string): string => {
   const value = `${int}${dec ? "." + dec : ""}`;
   return neg && value !== "0" ? `-${value}` : value;
 };
-const foldMinus = (text: string): string => text.replace(/[\u2212\u2013\u2012]/g, "-");
-const numberTokens = (text: string): string[] => (foldMinus(text).match(NUMBER_RE) ?? []).map(normalizeNumber);
+const foldDashes = (text: string): string => text.replace(/[\p{Pd}\u2212\u2796\uFE63\uFF0D]/gu, "-");
+/** NFKC + dash folding; evidence additionally has format/combining characters stripped. */
+const prep = (text: string, stripInvisible: boolean): string => {
+  const n = text.normalize("NFKC");
+  return foldDashes(stripInvisible ? n.replace(INVISIBLE_RE, "") : n);
+};
+const numberTokens = (prepared: string): string[] => (prepared.match(NUMBER_RE) ?? []).map(normalizeNumber);
 export const DRAFT_LINE = "DRAFT — suggestions only; an engineer must review.";
 
 const SYSTEM_PROMPT = [
@@ -115,9 +126,16 @@ export function validateStatements(
     if (citations.length === 0) { drop("NO_CITATION"); continue; }
     if (citations.some((id) => !byId.has(id))) { drop("UNKNOWN_CITATION"); continue; }
     if (citations.some((id) => byId.get(id)!.isGuidance)) { drop("GUIDANCE_CITATION"); continue; }
-    if (NON_ASCII_DIGIT_RE.test(s.text) || NUMBER_WORD_RE.test(s.text) || SCI_OR_SUFFIX_RE.test(s.text)) { drop("NUMBER_MISMATCH"); continue; }
-    const evidenceNumbers = new Set(citations.flatMap((id) => numberTokens(byId.get(id)!.text)));
-    if (numberTokens(s.text).some((n) => !evidenceNumbers.has(n))) { drop("NUMBER_MISMATCH"); continue; }
+    const normalized = s.text.normalize("NFKC");
+    if (
+      NON_ASCII_NUMERIC_RE.test(s.text) ||
+      /[\p{Cf}\p{M}]/u.test(s.text) ||
+      /[\p{Cf}\p{M}]/u.test(normalized)
+    ) { drop("NUMBER_MISMATCH"); continue; }
+    const text = prep(s.text, false);
+    if (NUMBER_WORD_RE.test(text) || MAGNITUDE_RE.test(text)) { drop("NUMBER_MISMATCH"); continue; }
+    const evidenceNumbers = new Set(citations.flatMap((id) => numberTokens(prep(byId.get(id)!.text, true))));
+    if (numberTokens(text).some((n) => !evidenceNumbers.has(n))) { drop("NUMBER_MISMATCH"); continue; }
     kept.push(statement);
   }
   return { kept, dropped };
