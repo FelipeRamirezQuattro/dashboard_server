@@ -129,6 +129,15 @@ test("duplicate primary key rejected on second row", () => {
   assert(r.rows.children.length === 1, "first kept");
 });
 
+test("primary key part containing | rejected with row and column", () => {
+  const r = run("id,note\np1,ok\nx|y,bad\n");
+  const issue = r.issues.find((i) => i.code === "PK_CONTAINS_SEPARATOR");
+  assert(issue && issue.severity === "reject" && issue.row === 3 && issue.column === "id" && issue.file === "parents.csv", "PK_CONTAINS_SEPARATOR at row 3 column id");
+  assert(r.rows.parents.length === 1 && !r.canCommit, "bad row dropped, no commit");
+  const ok = run("id,note\np1,has|pipe in non-key\n");
+  assert(!ok.issues.some((i) => i.code === "PK_CONTAINS_SEPARATOR"), "| in a non-key column is fine");
+});
+
 test("dangling reference rejected", () => {
   const r = run(P, `${CH}\nnope,a,,,,,,,\n`);
   assert(hasReject(r, "DANGLING_REFERENCE"), "DANGLING_REFERENCE");

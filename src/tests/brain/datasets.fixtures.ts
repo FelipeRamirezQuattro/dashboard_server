@@ -8,6 +8,11 @@ import {
   validateDefinitionShape,
   MAX_IMPORT_BYTES,
   builtinDefinitions,
+  DuplicatePrimaryKeyError,
+  selectRestoreCandidates,
+  capReportIssues,
+  parseDefinition,
+  MAX_REPORT_ISSUES,
 } from "../../services/brain/datasets.service";
 import { primaryKeyValueOf, buildRecordCards } from "../../services/brain/recordCards";
 import { rodPumpFailureDefinition } from "../../services/brain/definitions/rodPumpFailure";
@@ -119,5 +124,81 @@ assert(bad((d) => (d.tables[0].columns[1].name = d.tables[0].columns[0].name)).l
 assert(bad((d) => { d.tables[0].columns.find((c) => c.type === "enum")!.values = undefined; }).length > 0, "enum without values rejected");
 assert(validateDefinitionShape({ key: 1 }).length > 0, "garbage rejected");
 assert(validateDefinitionShape(null).length > 0, "null rejected");
+
+// ---- planRevisions: typed error, inactive history
+try {
+  planRevisions([], ["a", "a"]);
+  throw new Error("no throw");
+} catch (e) {
+  assert(e instanceof DuplicatePrimaryKeyError, "duplicate pks throw the typed error");
+}
+assertEqual(
+  planRevisions([{ pk: "a", revision: 2, active: false }], ["a"]),
+  [{ pk: "a", revision: 3 }],
+  "history without an active record: next revision, nothing superseded",
+);
+
+// ---- selectRestoreCandidates
+// B1 r1, B2 r2, B3 r3: B2 rolled back first while B3 is active => nothing
+assertEqual(
+  selectRestoreCandidates([
+    { pk: "k", revision: 1, status: "superseded" },
+    { pk: "k", revision: 2, status: "rolled_back" },
+    { pk: "k", revision: 3, status: "active" },
+  ]),
+  [],
+  "active record exists => nothing restored",
+);
+// then B3 rolled back => B1 r1 restored
+assertEqual(
+  selectRestoreCandidates([
+    { pk: "k", revision: 1, status: "superseded" },
+    { pk: "k", revision: 2, status: "rolled_back" },
+    { pk: "k", revision: 3, status: "rolled_back" },
+  ]),
+  [{ pk: "k", revision: 1 }],
+  "B2 and B3 rolled back => r1 restored",
+);
+assertEqual(
+  selectRestoreCandidates([
+    { pk: "k", revision: 1, status: "superseded" },
+    { pk: "k", revision: 2, status: "superseded" },
+    { pk: "k", revision: 3, status: "rolled_back" },
+  ]),
+  [{ pk: "k", revision: 2 }],
+  "highest superseded wins",
+);
+assertEqual(selectRestoreCandidates([{ pk: "n", revision: 1, status: "rolled_back" }]), [], "no superseded records => nothing");
+assertEqual(selectRestoreCandidates([]), [], "empty");
+
+// ---- capReportIssues
+const mk = (n: number) => Array.from({ length: n }, (_, i) => ({ file: "f.csv", row: i + 1, severity: "warn" as const, code: "X", message: "m" }));
+const small = capReportIssues({ issues: mk(3) });
+assertEqual([small.issues.length, small.issueTotal, small.truncated], [3, 3, undefined], "small report untouched");
+const big = capReportIssues({ issues: mk(MAX_REPORT_ISSUES + 5) });
+assertEqual([big.issues.length, big.issueTotal, big.truncated], [MAX_REPORT_ISSUES, MAX_REPORT_ISSUES + 5, true], "large report capped with flag");
+assertEqual(big.issues[0].row, 1, "first issues kept");
+
+// ---- registry hardening
+const badDef = (mutate: (d: DatasetDefinition) => void): string[] => bad(mutate);
+assert(badDef((d) => (d.tables[0].checks = ["toString"])).length > 0, "unknown check id toString rejected");
+assert(badDef((d) => (d.tables[0].checks = ["nope"])).length > 0, "unknown check id rejected");
+assert(badDef((d) => (d.tables[0].name = "Cases")).length > 0, "uppercase table name rejected");
+assert(badDef((d) => (d.tables[0].columns[0].name = "Case-Id")).length > 0, "bad column name rejected");
+assert(badDef((d) => (d.tables[0].file = "../x.csv")).length > 0, "path-like file rejected");
+assert(badDef((d) => (d.tables[0].file = "cases.txt")).length > 0, "non-csv file rejected");
+assert(badDef((d) => (d.tables[0].file = "README.txt")).length > 0, "README.txt rejected");
+assert(badDef((d) => (d.tables[0].name = "constructor")).length > 0, "constructor table rejected");
+assert(badDef((d) => (d.tables[0].columns[0].name = "prototype")).length > 0, "prototype column rejected");
+assert(badDef((d) => (d.tables[0].columns[0].name = "__proto__")).length > 0, "__proto__ column rejected");
+assert(badDef((d) => { d.tables[0].columns.find((c) => c.type === "enum")!.values = ["x".repeat(101)]; }).length > 0, "enum value over 100 chars rejected");
+assert(badDef((d) => { d.tables[0].columns.find((c) => c.type === "enum")!.values = Array.from({ length: 201 }, (_, i) => `v${i}`); }).length > 0, "more than 200 enum values rejected");
+assert(badDef((d) => { d.tables = Array.from({ length: 21 }, (_, i) => ({ ...clone(d.tables[0]), name: `t${i}`, file: `t${i}.csv` })); d.card = undefined; }).length > 0, "more than 20 tables rejected");
+assert(badDef((d) => { d.tables[0].columns = Array.from({ length: 101 }, (_, i) => ({ name: `c${i}`, type: "string" as const })); d.tables[0].primaryKey = ["c0"]; }).length > 0, "more than 100 columns rejected");
+{
+  const withExtra = { ...clone(rodPumpFailureDefinition), evil: "x".repeat(10) };
+  const r = parseDefinition(withExtra);
+  assert(r.ok && !("evil" in r.def), "parsed definition strips unknown keys (the parsed copy is what is stored)");
+}
 
 console.log("datasets fixtures passed");

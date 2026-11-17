@@ -108,6 +108,7 @@ router.post(
   requireRole("admin"),
   requireCategoryAccess("categoryId"),
   knowledge.requireDryRun,
+  knowledge.prepareImport,
   knowledge.uploadImportFiles,
   knowledge.dryRunDatasetImport,
 );

@@ -114,7 +114,7 @@ export interface IBrainImportBatch extends Document {
   categoryId: Oid;
   datasetKey: string;
   datasetVersion: string;
-  status: "dry_run" | "committed" | "rolled_back";
+  status: "dry_run" | "committing" | "committed" | "rolling_back" | "rolled_back";
   report: unknown; // counts and issues only, never row data
   files?: Record<string, string>; // raw CSV text by file name, kept only while dry_run
   fileHashes: Record<string, string>;
@@ -132,7 +132,7 @@ const importBatchSchema = new Schema<IBrainImportBatch>(
     categoryId: { type: objectId, ref: "WorkflowBrainCategory", required: true, index: true },
     datasetKey: { type: String, required: true },
     datasetVersion: { type: String, required: true },
-    status: { type: String, enum: ["dry_run", "committed", "rolled_back"], required: true },
+    status: { type: String, enum: ["dry_run", "committing", "committed", "rolling_back", "rolled_back"], required: true },
     report: { type: Schema.Types.Mixed, default: {} },
     files: { type: Schema.Types.Mixed },
     fileHashes: { type: Schema.Types.Mixed, default: {} },
@@ -183,7 +183,8 @@ const datasetRecordSchema = new Schema<IBrainDatasetRecord>(
   },
   { timestamps: true },
 );
-datasetRecordSchema.index({ categoryId: 1, datasetKey: 1, table: 1, primaryKeyValue: 1, revision: 1 });
+// Unique: two commits can never both create the same revision of a key (concurrent commits fail cleanly).
+datasetRecordSchema.index({ categoryId: 1, datasetKey: 1, table: 1, primaryKeyValue: 1, revision: 1 }, { unique: true });
 datasetRecordSchema.index({ categoryId: 1, datasetKey: 1, status: 1 });
 
 [documentSchema, definitionSchema, importBatchSchema, datasetRecordSchema].forEach((schema) =>

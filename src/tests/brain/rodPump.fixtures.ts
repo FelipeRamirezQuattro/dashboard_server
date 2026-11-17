@@ -87,6 +87,11 @@ test("duplicate wear key rejected", () => {
   assert(!r.canCommit && r.issues.some((i) => i.code === "DUPLICATE_KEY" && i.file === "wear.csv"), "dup");
 });
 
+test("wear composite key part with | rejected", () => {
+  const r = run({ "wear.csv": `${base["wear.csv"].trimEnd()}\nDEMO|001,plunger_in,5,9,mil\n` });
+  assert(r.issues.some((i) => i.code === "PK_CONTAINS_SEPARATOR" && i.severity === "reject" && i.file === "wear.csv" && i.column === "case_id"), "wear case_id with |");
+});
+
 test("days_run mismatch warns, does not reject", () => {
   const r = run(replaceIn("cases.csv", "2025-11-04,210,2025-04-08", "2025-11-04,300,2025-04-08"));
   assert(r.canCommit && warnCodes(r, "days_run_consistency") === 1, "days_run_consistency");

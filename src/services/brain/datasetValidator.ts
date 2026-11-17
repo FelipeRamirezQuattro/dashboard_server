@@ -151,6 +151,12 @@ const validateTable = (table: TableDef, text: string, issues: RowIssue[]): Table
       if (result.ok) row[col.name] = result.value;
       else reject(col.name, result.code, result.message);
     });
+    // Stored record ids and citations join key parts with "|", so a part containing it could collide.
+    for (const k of table.primaryKey) {
+      if (typeof row[k] === "string" && (row[k] as string).includes("|")) {
+        reject(k, "PK_CONTAINS_SEPARATOR", `${k} is part of the primary key and must not contain "|"`);
+      }
+    }
     if (rowOk && table.primaryKey.length > 0 && table.primaryKey.every((k) => row[k] !== undefined)) {
       const key = JSON.stringify(table.primaryKey.map((k) => row[k]));
       if (keys.has(key)) {

@@ -22,9 +22,8 @@ import {
   listRecords,
   registerDefinition,
   rollbackImport,
-  validateDefinitionShape,
+  parseDefinition,
 } from "../services/brain/datasets.service";
-import { DatasetDefinition } from "../services/brain/types";
 import { MAX_CSV_BYTES } from "../services/brain/csv";
 import { recordBrainAudit } from "../services/brainAudit.service";
 import logger from "../utils/logger";
@@ -151,10 +150,7 @@ export const patchDocument = async (req: Request, res: Response): Promise<void> 
 
 // ------------------------------------------------------------------ datasets
 
-const importUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_CSV_BYTES, files: 12, fields: 10 },
-});
+const MAX_IMPORT_FILES = 12;
 
 /** The commit is a separate endpoint: only dry runs are accepted here. Runs before any body is read. */
 export const requireDryRun = (req: Request, res: Response, next: NextFunction): void => {
@@ -165,7 +161,20 @@ export const requireDryRun = (req: Request, res: Response, next: NextFunction): 
   next();
 };
 
+/** Looks up the dataset definition so the upload can be capped at its table count. */
+export const prepareImport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const def = await getDefinitionForCategory(req.params.categoryId, req.params.key);
+    res.locals.importFileLimit = Math.min(def.tables.length, MAX_IMPORT_FILES);
+    next();
+  } catch (error) {
+    sendError(res, error);
+  }
+};
+
 export const uploadImportFiles = (req: Request, res: Response, next: NextFunction): void => {
+  const files = typeof res.locals.importFileLimit === "number" ? res.locals.importFileLimit : MAX_IMPORT_FILES;
+  const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_CSV_BYTES, files, fields: 10 } });
   importUpload.any()(req, res, (err: unknown) => {
     if (!err) return next();
     if (err instanceof multer.MulterError) {
@@ -198,12 +207,12 @@ export const getDatasetDefinitions = (_req: Request, res: Response): void => {
 
 export const putDatasetDefinition = async (req: Request, res: Response): Promise<void> => {
   try {
-    const errors = validateDefinitionShape(req.body);
-    if (errors.length) {
-      res.status(422).json({ error: "Invalid dataset definition.", code: "INVALID_DEFINITION", errors });
+    const parsed = parseDefinition(req.body);
+    if (!parsed.ok) {
+      res.status(422).json({ error: "Invalid dataset definition.", code: "INVALID_DEFINITION", errors: parsed.errors });
       return;
     }
-    const def = req.body as DatasetDefinition;
+    const def = parsed.def; // the parsed copy is what gets stored, never the raw body
     if (def.key !== req.params.key) {
       res.status(422).json({ error: "Definition key does not match the URL.", code: "INVALID_DEFINITION", errors: ["key: must equal the URL key"] });
       return;
@@ -222,14 +231,15 @@ export const dryRunDatasetImport = async (req: Request, res: Response): Promise<
       res.status(400).json({ error: "No files provided" });
       return;
     }
-    const files: Record<string, string> = {};
+    const fileMap = new Map<string, string>(); // field names are user input: never use them as plain object keys
     for (const f of uploaded) {
-      if (files[f.fieldname] !== undefined) {
+      if (fileMap.has(f.fieldname)) {
         res.status(422).json({ error: "A file was provided more than once.", code: "DUPLICATE_FILE" });
         return;
       }
-      files[f.fieldname] = decodeCsv(f.buffer);
+      fileMap.set(f.fieldname, decodeCsv(f.buffer));
     }
+    const files: Record<string, string> = Object.fromEntries(fileMap);
     const userId = req.user!._id.toString();
     const result = await dryRunImport({ categoryId: req.params.categoryId, datasetKey: req.params.key, files, userId });
     await recordBrainAudit({
@@ -241,7 +251,7 @@ export const dryRunDatasetImport = async (req: Request, res: Response): Promise<
         importBatchId: result.importId,
         status: "dry_run",
         counts: sumAccepted(result.report),
-        issues: result.report.issues.length,
+        issues: result.report.issueTotal,
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || undefined,
