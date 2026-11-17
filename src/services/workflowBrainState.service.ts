@@ -41,7 +41,9 @@ export const getCategoryState = async (
     unknownAreas,
     designOutputs,
   ] = await Promise.all([
-    BrainMemory.find({ categoryId }).sort({ createdAt: -1 }).limit(100),
+    BrainMemory.find({ categoryId, type: { $ne: "document_chunk" } })
+      .select("-embedding")
+      .sort({ createdAt: -1 }).limit(100),
     BrainEntity.find({ categoryId }).sort({ name: 1 }),
     BrainWorkflowStep.find({ categoryId }).sort({ position: 1, createdAt: 1 }),
     BrainWorkflowEdge.find({ categoryId }).sort({ createdAt: 1 }),

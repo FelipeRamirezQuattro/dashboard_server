@@ -48,7 +48,7 @@ export const updateMemory = async (
   } else if (data.summary !== undefined) {
     update.summary = data.summary;
   }
-  return BrainMemory.findByIdAndUpdate(memoryId, update, {
+  return BrainMemory.findOneAndUpdate({ _id: memoryId, type: { $ne: "document_chunk" } }, update, {
     new: true,
     runValidators: true,
   });
@@ -56,7 +56,7 @@ export const updateMemory = async (
 
 export const deleteMemory = async (memoryId: string) => {
   if (!mongoose.Types.ObjectId.isValid(memoryId)) return null;
-  return BrainMemory.findByIdAndDelete(memoryId);
+  return BrainMemory.findOneAndDelete({ _id: memoryId, type: { $ne: "document_chunk" } });
 };
 
 const addSource = (existing: mongoose.Types.ObjectId[], memoryId: mongoose.Types.ObjectId) => {
