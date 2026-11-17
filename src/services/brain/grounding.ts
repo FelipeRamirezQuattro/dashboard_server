@@ -93,18 +93,18 @@ const MAGNITUDE_WORDS: ReadonlySet<string> = new Set([
   "mds", "mill", "mills", "large", "kft", "klbs", "mlbs", "bio", "millones", "millon", "millón", "milliard", "milliards",
   "miljoen", "miljard", "tril", "trn", "bbn", "bbbl", "gig", "gigs", "mille", "bcm", "tcm", "man", "млн", "тыс", "млрд", "трлн", "тысяч",
 ]);
-// Later in a clause (not directly after a number) these common prose words are not read as magnitudes
-// ("e.g.", "a large pump", "a grand total"); directly after a number they still are ("5 large", "2e3").
-const LATER_RUN_EXEMPT: ReadonlySet<string> = new Set(["e", "large", "grand", "grands", "gross", "score", "gig", "gigs", "man"]);
+// Elsewhere in a clause (not directly after a number) these common prose words / labels are not read as magnitudes
+// ("e.g.", "a large pump", "a grand total", "x = 0"); directly after a number they still are ("5 large", "2e3", "2x").
+const LATER_RUN_EXEMPT: ReadonlySet<string> = new Set(["e", "x", "large", "grand", "grands", "gross", "score", "gig", "gigs", "man"]);
 const isMagnitudeLike = (word: string): boolean => {
   const w = word.toLowerCase();
   return MAGNITUDE_WORDS.has(w) || NUMBER_WORD_RE.test(w) || MAGNITUDE_PREFIX_RE.test(w) ||
     /^(?:kilo|mega|giga|tera|myriad)/.test(w) || /[万萬亿億千百兆]/u.test(w);
 };
 // Power and "times ten" notation: 2^3, 2 x 10, 2 × 10, 2·10 ("*" never reaches the gate: the sanitizer removes it).
-// Look-alike multiplication glyphs (∗ ∙ ⋅ ⋆ ✕ ✖ ⨉ ⨯ ╳), single or doubled, between two numbers.
+// Look-alike multiplication glyphs (∗ ∙ ⋅ ⋆ ✕ ✖ ⨉ ⨯ ╳ ⊗ ⊠ ✗ ✘ ⤫ ⤬), single or doubled, between two numbers.
 const POWER_RE =
-  /\d\s*(?:\^|\*\*\s*[-+]?\d|[x\u00D7*\u00B7]\s*10|[\u2217\u2219\u22C5\u22C6\u2715\u2716\u2A09\u2A2F\u2573]+\s*[-+]?\d)/i;
+  /\d\s*(?:\^|\*\*\s*[-+]?\d|[x\u00D7*\u00B7]\s*10|[\u2217\u2219\u22C5\u22C6\u2715\u2716\u2A09\u2A2F\u2573\u2297\u22A0\u2717\u2718\u292B\u292C]+\s*[-+]?\d)/i;
 // One space-like / apostrophe / underscore separator then exactly three digits: reads as 1 210 = 1210.
 const SPACE_GROUP_RE = /\d[\p{Zs}'\u2018\u2019_\u00B7\u2800]\d{3}(?!\d)/u;
 // Any run of characters between two digits that are not letters, whitespace or ASCII , . - / : % $ ( ) +
@@ -230,26 +230,42 @@ const endsClause = (cs: string[], i: number): boolean => {
 const APOSTROPHES = new Set(["'", "’"]);
 
 /**
- * Letter runs after numbers, in one linear pass (masked words are U+FFFD):
+ * Letter runs around numbers, in one linear pass (masked words are U+FFFD):
  *  - a run that directly follows a number (after separators only) must be allowlisted (1-5 letters) and never
  *    magnitude-like ("1.2 bn", "1.2 large");
  *  - a run that follows masked words that directly follow a number must never be magnitude-like, with no exemptions
  *    ("1.2 USD mln", "1.2FeS bn", "1.2 FeS large"); the allowlist is not applied there ("95 days due", "6 mil between");
- *  - every later run in the same clause (the clause has a number before it) must not be magnitude-like
- *    ("cost $1.2 total mln", "1.2 dollars mln"); contraction tails (didn't) and LATER_RUN_EXEMPT words are skipped.
+ *  - a clause that contains a number must not contain a magnitude-like run ANYWHERE, before or after the number
+ *    ("Cost (USD bn) was 1.2", "1.2 dollars mln"); contraction tails (didn't), "e.g." and LATER_RUN_EXEMPT words are
+ *    skipped;
+ *  - a short clause (<= 3 words, no number) with a magnitude-like run right after a clause with a number reads as a
+ *    continuation ("cost 1.2 USD. Mln", "1.2 USD; in mln") and drops; longer sentences do not ("Then the k valve failed").
  */
 const suffixViolation = (t: string): boolean => {
   const cs = Array.from(t);
   const n = cs.length;
-  let inClause = false; // a number has been seen in the current clause
+  let clauseNum = false; // the current clause contains a number
+  let clauseMag = false; // the current clause contains a non-exempt magnitude-like run
+  let clauseRuns = 0; // letter runs in the current clause
+  let prevClauseNum = false;
   let direct = false; // the next letter run directly follows a number (possibly through masked words)
   let viaMask = false; // ... and a masked word sits between the number and the run
+  const endClause = (): boolean => {
+    const continuation = !clauseNum && clauseMag && prevClauseNum && clauseRuns <= 3;
+    prevClauseNum = clauseNum;
+    clauseNum = false;
+    clauseMag = false;
+    clauseRuns = 0;
+    direct = false;
+    return continuation;
+  };
   let i = 0;
   while (i < n) {
     const c = cs[i];
     if (isAsciiDigit(c)) {
       while (i < n && isAsciiDigit(cs[i])) i++;
-      inClause = true;
+      if (clauseMag) return true;
+      clauseNum = true;
       direct = true;
       viaMask = false;
       continue;
@@ -259,14 +275,18 @@ const suffixViolation = (t: string): boolean => {
       let k = i;
       while (k < n && isLetter(cs[k])) k++;
       const run = cs.slice(i, k).join("").toLowerCase();
+      clauseRuns++;
       if (direct && viaMask) {
         if (isMagnitudeLike(run)) return true;
       } else if (direct) {
         if (isMagnitudeLike(run) || (run.length <= 5 && !NUMBER_SUFFIX_ALLOWLIST.has(run))) return true;
-      } else if (inClause && !LATER_RUN_EXEMPT.has(run) && isMagnitudeLike(run)) {
+      } else if (!LATER_RUN_EXEMPT.has(run) && isMagnitudeLike(run)) {
         const contraction = i >= 2 && APOSTROPHES.has(cs[i - 1]) && isLetter(cs[i - 2]);
         const eg = run === "g" && cs[i - 1] === "." && (cs[i - 2] === "e" || cs[i - 2] === "E") && !(i >= 3 && isLetter(cs[i - 3]));
-        if (!contraction && !eg) return true;
+        if (!contraction && !eg) {
+          if (clauseNum) return true;
+          clauseMag = true;
+        }
       }
       direct = false;
       viaMask = false;
@@ -276,11 +296,11 @@ const suffixViolation = (t: string): boolean => {
     // separators: clause punctuation followed by whitespace/end ends the "directly follows" chain ("6, Plunger");
     // attached punctuation and closing brackets do not ("1.2:k", "(1.2)bn").
     if (CLAUSE_STOP.has(c) && (i + 1 >= n || /\s/.test(cs[i + 1]))) direct = false;
-    if (endsClause(cs, i)) { inClause = false; direct = false; }
+    if (endsClause(cs, i)) { if (endClause()) return true; }
     else if (/\p{N}/u.test(c)) direct = false; // non-ASCII numerics are rejected before this scan
     i++;
   }
-  return false;
+  return endClause();
 };
 
 // Dotted sequences (1.2.3, 2024.03.15) are not decimals; they must be copied verbatim from evidence.

@@ -195,9 +195,9 @@ const EV_A = "cost=1.2 wells=1 k=2";
 for (const t of ["cost 1.2[1]bn", "cost 1.2  bn", "cost 1.2\n\nbn", "cost 2[1]k", "cost 1.2[ 1 ]e3", "cost 1.2\u2028bn", "cost 1.2\u0085bn", "cost 1.2\u2029bn", "cost 1.2\u3000bn", "cost 1.2\u001Fbn", "cost 1.2\uFF3B1\uFF3Dbn"]) {
   expect(`A invalid ${JSON.stringify(t)}`, verdict(EV_A, t), D);
 }
-// round 6: "wells 1\n\nand k 2" now drops ("k" later in a clause with a number reads as a magnitude, see R6-I2);
-// the flattening case uses a non-magnitude label instead.
-for (const t of ["cost 1.2 [1] total", "wells 1\n\nand cost 1.2", "cost [ 1 ]1.2", "k\u20282 [12] wells 1"]) {
+// round 6/7: "wells 1\n\nand k 2" and "k 2 [12] wells 1" now drop ("k" anywhere in a clause with a number reads as a
+// magnitude, see R6-I2 / R7); the flattening cases use a non-magnitude label instead.
+for (const t of ["cost 1.2 [1] total", "wells 1\n\nand cost 1.2", "cost [ 1 ]1.2", "cost\u20281.2 [12] wells 1"]) {
   const p = pipeline(EV_A, t);
   expect(`A valid ${JSON.stringify(t)}`, p.verdict, "KEPT");
   expect(`A bullet == checked ${JSON.stringify(t)}`, p.bullet, `- ${p.checked} [1]`);
@@ -416,5 +416,27 @@ for (const [name, s] of [["clause", "1 a ".repeat(25000)], ["mask", "1.2 USD ".r
   expect(`R6 timing ${name} < 100 ms (${ms} ms)`, ms < 100, true);
 }
 
-if (failures.length) throw new Error(`${failures.length} round-4/5/6 fixture failures:\n${failures.join("\n")}`);
+// ---- round 7 (Task 14 review): magnitude BEFORE the number in the same clause; a magnitude-only clause right after
+// a number clause; more look-alike times glyphs.
+for (const t of ["Cost (bn) 1.2", "Cost (USD bn) was 1.2", "Cost in USD mln: 1.2", "Cost, mln USD: 1.2", "In mln, cost 1.2",
+  "k: 1.2 USD", "k\u20282 [12] wells 1", "cost 1.2 USD. Mln", "cost 1.2 USD; mln", "cost 1.2 USD. MLN", "cost 1.2 USD. Bn", "cost 1.2 USD. K", "cost 1.2 USD. M",
+  "cost 1.2 USD. In mln."]) {
+  expect(`R7 invalid ${JSON.stringify(t)}`, verdict("cost=1.2 USD", t), D);
+}
+for (const t of ["1.2 ⊗ 10", "1.2 ⊠ 10", "1.2 ✗ 10", "1.2 ✘ 10", "1.2 ⤫ 10", "1.2 ⤬ 10"]) {
+  expect(`R7 invalid glyph ${JSON.stringify(t)}`, verdict("x=1.2 y=10", t), D);
+}
+for (const [e, t] of [["cost=1.2 USD", "Cost was 1.2 USD"], ["cost=1.2 USD", "Cost was 1.2 USD in total"], ["DEMO-001 days_run=210", "DEMO-001 ran 210 days"],
+  ["wear=6, 7", "wear 6 and 7 mil"], ["d=2024-03-15", "on 2024-03-15"], ["a=210 b=290", "210–290"],
+  ["x=210", "ran 210 days. Then the k valve failed"], ["x=210", "The k valve failed. It ran 210 days."], ["x=210", "ran 210 days. Then it was pulled."]]) {
+  expect(`R7 valid ${JSON.stringify(e)} / ${JSON.stringify(t)}`, verdict(e, t), "KEPT");
+}
+for (const [name, s] of [["before", "k a 1 ".repeat(16000)], ["contclause", "1. M. ".repeat(16000)], ["glyph7", "1 ⊗".repeat(33000)]] as [string, string][]) {
+  const t0 = Date.now();
+  validateStatements([{ text: s, citations: ["q"] }], [ev("q", "x=1 y=1.2 USD a b")]);
+  const ms = Date.now() - t0;
+  expect(`R7 timing ${name} < 100 ms (${ms} ms)`, ms < 100, true);
+}
+
+if (failures.length) throw new Error(`${failures.length} round-4/5/6/7 fixture failures:\n${failures.join("\n")}`);
 console.log("grounding fixtures passed");
