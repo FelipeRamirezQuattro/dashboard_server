@@ -13,23 +13,29 @@ export type DropReason = "NO_CITATION" | "UNKNOWN_CITATION" | "GUIDANCE_CITATION
 
 const MAX_STATEMENTS = 30;
 const MAX_STATEMENT_CHARS = 2000;
-// A "-" is a sign only at the start or after whitespace/"("; digit runs joined by commas are one token
-// (valid thousands grouping or not), so "1,1" becomes 11 and cannot match a stored 1 and 1.
-const NUMBER_RE = /(?:(?<=^|[\s(])-)?\d+(?:,\d+)*(?:\.\d+)?/g;
+// A "-" is a sign only at the start or after whitespace or one of ( = : ; [ (evidence renders col=value).
+// Thousands grouping needs exact 3-digit groups ("1,210" => 1210); anything else splits ("1,2,3" => 1,2,3).
+// Unicode minus/dashes are folded to "-" first; leading-dot decimals (".5") are numbers (0.5).
+const NUMBER_RE = /(?:(?<=^|[\s(=:;\[])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)/g;
 const NON_ASCII_DIGIT_RE = /(?![0-9])\p{Nd}/u;
-// Large number words are rejected. Small words (one, two, ...) are intentionally allowed: this gate checks
-// numeric tokens only, and a matching token may come from any part of the cited text, not a specific field.
-const NUMBER_WORD_RE = /\b(?:hundred|thousand|million|billion|dozen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/i;
+// Scientific notation and magnitude suffixes (2.1e2, 2k, 1.2M) cannot be verified token-wise: rejected.
+const SCI_OR_SUFFIX_RE = /\d[eE][+-]?\d|\d[kKmMbB]\b/;
+// Large number words (and any suffix such as "hundreds", "seventyfold") are rejected. Small words (one, two,
+// eleven, ...) are intentionally allowed: this gate checks numeric tokens only, and a matching token may come
+// from any part of the cited text, not a specific field.
+const NUMBER_WORD_RE = /\b(?:hundred|thousand|million|billion|dozen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\w*/i;
 
 const normalizeNumber = (token: string): string => {
   const neg = token.startsWith("-");
   const body = (neg ? token.slice(1) : token).replace(/,/g, "");
   const [intRaw, decRaw = ""] = body.split(".");
-  const int = intRaw.replace(/^0+(?=\d)/, "");
+  const int = intRaw.replace(/^0+(?=\d)/, "") || "0";
   const dec = decRaw.replace(/0+$/, "");
-  return `${neg ? "-" : ""}${int}${dec ? "." + dec : ""}`;
+  const value = `${int}${dec ? "." + dec : ""}`;
+  return neg && value !== "0" ? `-${value}` : value;
 };
-const numberTokens = (text: string): string[] => (text.match(NUMBER_RE) ?? []).map(normalizeNumber);
+const foldMinus = (text: string): string => text.replace(/[\u2212\u2013\u2012]/g, "-");
+const numberTokens = (text: string): string[] => (foldMinus(text).match(NUMBER_RE) ?? []).map(normalizeNumber);
 export const DRAFT_LINE = "DRAFT — suggestions only; an engineer must review.";
 
 const SYSTEM_PROMPT = [
@@ -109,7 +115,7 @@ export function validateStatements(
     if (citations.length === 0) { drop("NO_CITATION"); continue; }
     if (citations.some((id) => !byId.has(id))) { drop("UNKNOWN_CITATION"); continue; }
     if (citations.some((id) => byId.get(id)!.isGuidance)) { drop("GUIDANCE_CITATION"); continue; }
-    if (NON_ASCII_DIGIT_RE.test(s.text) || NUMBER_WORD_RE.test(s.text)) { drop("NUMBER_MISMATCH"); continue; }
+    if (NON_ASCII_DIGIT_RE.test(s.text) || NUMBER_WORD_RE.test(s.text) || SCI_OR_SUFFIX_RE.test(s.text)) { drop("NUMBER_MISMATCH"); continue; }
     const evidenceNumbers = new Set(citations.flatMap((id) => numberTokens(byId.get(id)!.text)));
     if (numberTokens(s.text).some((n) => !evidenceNumbers.has(n))) { drop("NUMBER_MISMATCH"); continue; }
     kept.push(statement);
@@ -157,7 +163,7 @@ export function composeAnswer(p: {
       .map((id) => `[${index.get(id)}]`)
       .join(" ");
     // flatten so statement text cannot forge structure lines or citation markers
-    const text = s.text.replace(/\[\d+\]/g, " ").replace(/\s+/g, " ").trim();
+    const text = s.text.replace(/\[\s*\d+\s*\]/g, " ").replace(/[\s\u0085]+/g, " ").trim();
     return `- ${text} ${markers}`.trimEnd();
   });
   const tail = [`Based on ${usedCount} stored records.`];

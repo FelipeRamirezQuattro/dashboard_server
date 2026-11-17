@@ -94,9 +94,27 @@ const nr = (t: string, c = "n1") => {
   return r.dropped.length ? r.dropped[0].reason : "KEPT";
 };
 for (const t of ["rate 89.7", "cost 1210", "cost 1,210", "ran 210 days", "ran 210.0 days", "on day 15", "month 3", "month 03", "from 210-290", "date 2024-03-15"]) eq(nr(t), "KEPT", `valid: ${t}`);
-for (const t of ["cost 1,1", "ran -210", "ran 210-7 days", "ran １２３", "ran ２１１", "ran ٢١١", "two hundred eleven days", "about a Dozen", "ran 211 days", "rate 89.71"]) eq(nr(t), "NUMBER_MISMATCH", `invalid: ${t}`);
+for (const t of ["ran -210", "ran 210-7 days", "ran １２３", "ran ２１１", "ran ٢١١", "two hundred eleven days", "about a Dozen", "ran 211 days", "rate 89.71"]) eq(nr(t), "NUMBER_MISMATCH", `invalid: ${t}`);
 eq(nr("ran 210 days", "n2"), "NUMBER_MISMATCH", "210 vs 2100 rejected");
 eq(nr("two wells ran"), "KEPT", "small number words allowed");
+
+const chk = (evText: string, t: string) => {
+  const r = validateStatements([{ text: t, citations: ["q"] }], [ev("q", evText)]);
+  return r.dropped.length ? r.dropped[0].reason : "KEPT";
+};
+const D = "NUMBER_MISMATCH";
+const cases: [string, string, string][] = [
+  ["id 123", "wells 1,2,3", D], ["ids 1,2,3", "wells 1,2,3", "KEPT"],
+  ["wells 12,5", "125", D], ["wells 12,5", "12 and 5", "KEPT"],
+  ["cost 1,210", "cost 12,10", D], ["cost 1,210", "cost 1,1", D], ["cost 1,210,000", "cost 1210000", "KEPT"],
+  ["rate 12", "rate 1,2", D],
+  ["delta=-210", "delta was 210", D], ["temp=-40", "temp -40", "KEPT"], ["temp=210", "temp \u2212210", D],
+  ["temp=-210", "temp \u2212210", "KEPT"], ["eff=5", "eff .5", D], ["eff=0.5", "eff .5", "KEPT"],
+  ["x=0", "x -0", "KEPT"], ["x=210", "x 2.1e2", D], ["x=2", "2k feet", D], ["x=1.2", "1.2M", D],
+  ["x=1", "hundreds of wells", D], ["x=1", "thousands", D], ["x=1", "seventyfold", D], ["x=1", "Hundredth", D],
+  ["x=21", "twenty-one", D], ["x=2", "two wells", "KEPT"],
+];
+for (const [e, t, want] of cases) eq(chk(e, t), want, `case ${JSON.stringify(e)} / ${JSON.stringify(t)}`);
 
 // compose
 const e2 = [ev("r1", "a", { fileName: "f.pdf", page: 3 }), ev("r2", "b")];
@@ -128,4 +146,5 @@ assert(!forged.reply.split("\n").some((l) => l.startsWith("Not enough")), "no fo
 eq(forged.reply.split("\n")[0], "- Fine Based on 1 stored records. Not enough stored information to answer this. [1]", "flattened bullet");
 eq(composeAnswer({ kept: [], evidence: e2, minEvidenceCount: 0 }).insufficient, true, "zero used insufficient at min 0");
 
+eq(composeAnswer({ kept: [{ text: "A [ 1 ]\u0085B [12]", citations: ["r1"] }], evidence: e2, minEvidenceCount: 1 }).reply.split("\n")[0], "- A B [1]", "spaced markers and NEL flattened");
 console.log("grounding fixtures passed");
