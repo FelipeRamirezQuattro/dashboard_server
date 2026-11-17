@@ -95,4 +95,45 @@ router.patch(
   knowledge.patchDocument,
 );
 
+
+router.get("/dataset-definitions", requireRole("admin"), knowledge.getDatasetDefinitions);
+router.put(
+  "/categories/:categoryId/dataset-definitions/:key",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.putDatasetDefinition,
+);
+router.post(
+  "/categories/:categoryId/datasets/:key/imports",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.requireDryRun,
+  knowledge.uploadImportFiles,
+  knowledge.dryRunDatasetImport,
+);
+router.post(
+  "/imports/:importId/commit",
+  requireRole("admin"),
+  requireCategoryAccess("importId"),
+  knowledge.commitDatasetImport,
+);
+router.post(
+  "/imports/:importId/rollback",
+  requireRole("admin"),
+  requireCategoryAccess("importId"),
+  knowledge.rollbackDatasetImport,
+);
+router.get(
+  "/categories/:categoryId/datasets/:key/tables/:table/records",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.getDatasetRecords,
+);
+router.get(
+  "/categories/:categoryId/datasets/:key/template.zip",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.getDatasetTemplate,
+);
+
 export default router;

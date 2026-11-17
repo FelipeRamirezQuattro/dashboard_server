@@ -29,6 +29,9 @@ const rowLine = (table: TableDef, row: Row): string => {
 const keyParts = (table: TableDef, row: Row): string[] => table.primaryKey.map((k) => render(row[k]));
 const keyValue = (table: TableDef, row: Row): string => keyParts(table, row).join("|");
 
+/** The one pk formatting used for evidence ids and stored records (composite keys joined with "|"). */
+export const primaryKeyValueOf = (table: TableDef, row: Row): string => keyValue(table, row);
+
 const compareKey = (table: TableDef, a: Row, b: Row): number => {
   for (const k of table.primaryKey) {
     const x = a[k];
