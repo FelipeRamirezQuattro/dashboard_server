@@ -74,3 +74,22 @@ export const fakePorts = (w: FakeWorld): RetrievalPorts & { embedCalls: number }
   };
   return ports;
 };
+
+const SP = "ds:rod_pump_failure/";
+/** Off-topic questions that share one generic domain word with the sample data (review r8). */
+export const OFF_TOPIC = [
+  "what is the run time of my washing machine",
+  "how long should I run today",
+  "what wear should I put on for a wedding",
+  "what action movies are good",
+  "tell me about solids in baby food",
+  "what pump should I buy for my aquarium",
+];
+/** Legitimate questions and one row id each must retrieve. */
+export const LEGIT: [string, string][] = [
+  ["why did DEMO-001 fail?", `${SP}cases/DEMO-001`],
+  ["which cases had paraffin evidence?", `${SP}solids/DEMO-002|hydrocarbon_paraffin`],
+  ["what wear readings were recorded for the plunger?", `${SP}wear/DEMO-001|plunger_in|0`],
+  ["how many days did DEMO-002 run?", `${SP}cases/DEMO-002`],
+  ["what failure modes were seen?", `${SP}components/DEMO-001-plunger`],
+];

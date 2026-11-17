@@ -7,7 +7,7 @@ import { retrieveEvidence } from "../../services/brain/retrieval";
 import type { ChunkLite, DocumentLite } from "../../services/brain/retrieval";
 import { shouldUseGrounding } from "../../services/workflowBrainChat.service";
 import type { Evidence } from "../../services/brain/types";
-import { fakePorts, sampleRecords } from "./sampleData";
+import { LEGIT, OFF_TOPIC, fakePorts, sampleRecords } from "./sampleData";
 
 const failures: string[] = [];
 const expect = (name: string, got: unknown, want: unknown): void => {
@@ -196,6 +196,24 @@ const main = async (): Promise<void> => {
     expect(`(floor) off-topic ${JSON.stringify(q)} => insufficient`, off.insufficient, true);
   }
   expect("(floor) off-topic: model never called", offModel.calls.length, 0);
+
+  // keyword overlap floor end-to-end (FAKE 1536-d vectors, all below minScore)
+  const D = 1536;
+  const unit = (i: number): number[] => { const v = new Array(D).fill(0); v[i] = 1; return v; };
+  const orth = records.map((r, i) => (r.cardText ? { ...r, embedding: unit(i + 1), embeddingModel: "m", embeddingVersion: "1" } : r));
+  const orthRetrieve: GroundedPorts["retrieve"] = (p, qq) =>
+    retrieveEvidence({ ...p, minScore: 0.3 }, qq, fakePorts({ records: orth, identity: { model: "m", version: "1" }, embed: async () => unit(0) }));
+  const offTopicModel = fakeModel(json([{ text: "A front-loader runs about an hour.", citations: [C1] }, { text: "Wear a suit.", citations: [`${P}cases/DEMO-002`] }]));
+  for (const q of OFF_TOPIC) {
+    const r = await answerGroundedWith({ retrieve: orthRetrieve, callModel: offTopicModel.callModel, audit: async () => undefined }, { category: cat(), question: q });
+    expect(`(overlap) off-topic ${JSON.stringify(q)} => insufficient`, r.insufficient, true);
+  }
+  expect("(overlap) off-topic: model never called", offTopicModel.calls.length, 0);
+  for (const [q, id] of LEGIT) {
+    const m = fakeModel((c) => (c.user.includes(`<evidence id="${id}">`) ? json([{ text: "Stored record.", citations: [id] }]) : json([])));
+    const r = await answerGroundedWith({ retrieve: orthRetrieve, callModel: m.callModel, audit: async () => undefined }, { category: cat(1), question: q });
+    expect(`(overlap) legit ${JSON.stringify(q)} answered from ${id}`, [m.calls.length, r.insufficient, r.citations.map((x) => x.id)], [1, false, [id]]);
+  }
 
   // no OpenAI key: the reply keeps the first sentence and never claims "Searched: 0 stored records"
   const noKey = withoutSearchClaim(await answerGroundedWith(

@@ -7,6 +7,7 @@ import { buildChunkEmbeddingText, selectActiveRecords } from "./indexerCore";
 import { buildRecordCards, primaryKeyValueOf } from "./recordCards";
 import type { DatasetDefinition, Evidence } from "./types";
 import { env } from "../../config/env";
+import { tokensFor } from "./text";
 import { keywordRank, rankByCosine, rrfMerge } from "./vector";
 import type { ScoredId } from "./vector";
 
@@ -28,6 +29,9 @@ export const MAX_VECTORS_PER_CATEGORY = 20_000;
 export const MAX_GUIDANCE_CHUNKS = 5;
 export const MAX_GUIDANCE_CHARS = 500;
 const VECTOR_TOP_K = 40;
+
+/** "cases" -> "case", "readings" -> "reading" (overlap counting only; keywordRank itself is unchanged). */
+const foldPlural = (t: string): string => (t.length > 3 && t.endsWith("s") && !t.endsWith("ss") ? t.slice(0, -1) : t);
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -80,6 +84,11 @@ const dedupeById = (items: Evidence[]): Evidence[] => {
  * Relevance floor (A6a.3): scored vector hits below minScore are removed BEFORE fusion, so a candidate found by vectors
  * alone below the floor is dropped; candidates with a keyword hit or a named key stay. Plain string vector ranks are
  * unscored and always pass. minScore defaults to env.brainMinScore (BRAIN_MIN_SCORE, provisional 0.30).
+ * Keyword floor: a candidate that is neither named nor a vector hit at/above minScore needs requiredOverlap distinct
+ * shared content tokens (1 for questions with <= 2 content tokens, else 2).
+ * Known limit: relevance is heuristic (token overlap + a provisional cosine floor). An off-topic question can still
+ * share two generic words with stored rows. The remaining defenses are the strict prompt, minEvidenceCount and the
+ * citation/number gates in validateStatements; a cited NON-numeric off-topic statement is not caught by those gates.
  */
 export function selectEvidence(p: {
   question: string;
@@ -99,7 +108,19 @@ export function selectEvidence(p: {
     (q, k) => (k.trim() ? q.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(k.trim())}(?![\\p{L}\\p{N}])`, "giu"), " ") : q),
     p.question,
   );
-  const keyword = keywordRank(keywordQuestion, candidates.map((e) => ({ id: e.id, text: `${e.label}\n${e.text}` })));
+  const textOf = (e: Evidence): string => `${e.label}\n${e.text}`;
+  // Keyword admission needs enough DISTINCT shared content tokens (tokensFor, light plural folding): 1 when the question
+  // has <= 2 content tokens, else 2. One generic domain word ("run", "wear", "pump") is not enough for a longer question.
+  const questionTokens = new Set(tokensFor(keywordQuestion).map(foldPlural));
+  const requiredOverlap = questionTokens.size <= 2 ? 1 : 2;
+  const overlapOf = (e: Evidence): number => {
+    const own = new Set(tokensFor(textOf(e)).map(foldPlural));
+    let n = 0;
+    for (const t of questionTokens) if (own.has(t)) n += 1;
+    return n;
+  };
+  const keyword = keywordRank(keywordQuestion, candidates.map((e) => ({ id: e.id, text: textOf(e) })))
+    .filter((id) => overlapOf(byId.get(id)!) >= requiredOverlap);
   const minScore = p.minScore ?? env.brainMinScore;
   const vector = (p.vectorRanks ?? [])
     .filter((v) => typeof v === "string" || (Number.isFinite(v.score) && v.score >= minScore))

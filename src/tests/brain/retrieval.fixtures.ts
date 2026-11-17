@@ -12,7 +12,7 @@ import {
 } from "../../services/brain/retrieval";
 import type { ChunkLite, DocumentLite } from "../../services/brain/retrieval";
 import type { Evidence } from "../../services/brain/types";
-import { fakePorts, sampleRecords } from "./sampleData";
+import { LEGIT, OFF_TOPIC, fakePorts, sampleRecords } from "./sampleData";
 
 const failures: string[] = [];
 const expect = (name: string, got: unknown, want: unknown): void => {
@@ -195,6 +195,32 @@ const main = async (): Promise<void> => {
     selectEvidence({ question: "nothing", candidates: cands, namedKeys: [], minScore: 1, vectorRanks: [`${P}cases/DEMO-003`] }).map((e) => e.id), [`${P}cases/DEMO-003`]);
   expect("floor: parseMinScore", [parseMinScore(undefined), parseMinScore(""), parseMinScore("0.5"), parseMinScore("2"), parseMinScore("-1"), parseMinScore("abc")],
     [0.3, 0.3, 0.5, 1, 0, 0.3]);
+
+  // ---- keyword overlap floor: one shared generic token is not enough when the question has > 2 content tokens.
+  // FAKE 1536-d one-hot vectors: every card is orthogonal to the query (cosine 0 < minScore).
+  const D = 1536;
+  const unit = (i: number): number[] => { const v = new Array(D).fill(0); v[i] = 1; return v; };
+  const orth = records.map((r, i) => (r.cardText ? { ...r, embedding: unit(i + 1), embeddingModel: "m", embeddingVersion: "1" } : r));
+  const orthPorts = () => fakePorts({ records: orth, identity, embed: async () => unit(0) });
+  for (const q of OFF_TOPIC) {
+    expect(`overlap: off-topic ${JSON.stringify(q)} => 0 evidence`, (await retrieveEvidence({ categoryId: "c1", minScore: 0.3 }, q, orthPorts())).evidence.length, 0);
+  }
+  for (const [q, id] of LEGIT) {
+    const ids = (await retrieveEvidence({ categoryId: "c1", minScore: 0.3 }, q, orthPorts())).evidence.map((e) => e.id);
+    ok(`overlap: legit ${JSON.stringify(q)} retrieves ${id} (got ${ids.length})`, ids.includes(id));
+  }
+  // <= 2 content tokens: one shared token is enough
+  ok("overlap: short question admits one-token overlap",
+    (await retrieveEvidence({ categoryId: "c1", minScore: 0.3 }, "paraffin solids", orthPorts())).evidence.some((e) => e.id === `${P}solids/DEMO-002|hydrocarbon_paraffin`));
+  // a corroborated vector hit (>= minScore) needs no keyword overlap; named keys stay exempt
+  expect("overlap: vector hit above floor still admitted without overlap",
+    selectEvidence({ question: "alpha beta gamma delta", candidates: cands, namedKeys: [], minScore: 0.3, vectorRanks: [{ id: `${P}cases/DEMO-003`, score: 0.5 }] }).map((e) => e.id),
+    [`${P}cases/DEMO-003`]);
+  expect("overlap: one shared token among 4 content tokens is not enough",
+    selectEvidence({ question: "tubing alpha beta gamma", candidates: cands, namedKeys: [], minScore: 0.3 }).map((e) => e.id), []);
+  expect("overlap: two shared tokens admit",
+    selectEvidence({ question: "plunger wear alpha beta", candidates: cands, namedKeys: [], minScore: 0.3 }).map((e) => e.id).sort(),
+    [`${P}cases/DEMO-002`, "doc:d1#0"].sort());
 
   if (failures.length) throw new Error(`${failures.length} retrieval fixture failures:\n${failures.join("\n")}`);
   console.log("retrieval fixtures passed");
