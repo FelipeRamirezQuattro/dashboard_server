@@ -22,6 +22,10 @@ const NUMBER_RE = /(?:(?<![\p{L}\p{N}])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|
  * Number gate design (A6: "any number in an answer must equal a stored value in a cited record").
  * The gate is a reading of the DISPLAYED text, so it first makes displayed text == checked text
  * (sanitizeStatementText runs in parseModelOutput; validate and compose re-apply it, which is a no-op).
+ * The chat client renders **bold** and [text](url) links, so the sanitizer neutralises markdown: every "*" and
+ * backtick is removed and every "[" / "]" becomes "(" / ")", so the client renders statement text verbatim. Markup
+ * sitting directly between a digit and a digit / "." / "," (1**.**2, **1,**210, 1`210) would join numbers once
+ * removed; it is replaced by U+FFFD, which the gate always drops.
  * A statement is then dropped (NUMBER_MISMATCH) unless every way a reader could see a number is a plain token
  * that equals a stored token:
  *  1. Characters that hide or change what a reader sees: any non-ASCII numeric character, any format (Cf),
@@ -31,10 +35,17 @@ const NUMBER_RE = /(?:(?<![\p{L}\p{N}])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|
  *     in NUMBER_SUFFIX_ALLOWLIST (units, ordinals, common short words); 6+ letters are words and pass unless they
  *     contain a number-word stem or start with an oilfield magnitude prefix (mm..., bcf...). This subsumes
  *     magnitude suffixes (k, bn, mln, G, ...), e-notation (2e3) and "x" in 2x10.
- *  3. Power / times-ten notation (2^3, 2**3, 2 x 10, 2*10) and number words (hundred, ...illion, lakh, ...).
- *  4. A single space-like separator followed by exactly three digits ("1 210") reads as thousands grouping.
+ *  3. Power / times-ten notation (2^3, 2 x 10, 2·10) and number words (hundred, ...illion, lakh, kilobarrels, ...).
+ *  4. A single space-like separator followed by exactly three digits ("1 210") reads as thousands grouping, and
+ *     any other character between two digit runs that is not a letter or one of space , . - / : % $ ( ) +
+ *     (1·2, 1٫2, 1′210, 1∙210) reads as a look-alike decimal or grouping mark.
  *  5. A word that starts with a letter and contains a digit (identifier: v2k, id3e4f) must appear verbatim in the
  *     cited evidence; otherwise it could be a currency/magnitude form (EUR2k) or a digit look-alike (l0).
+ *  6. Masking (rules 2-3 only): a compound token [A-Za-z0-9][A-Za-z0-9._/-]* copied verbatim from the cited evidence
+ *     (20-125-RHBC-16-5-4, PL-100-G, DEMO-001-tv-ball) and a 3+ letter word that is a whole word of the cited
+ *     evidence (FeS from scale_fes) are not read as suffixes; such a word never masks when it looks like a
+ *     magnitude/number word (mln, tsd, kilobarrels, MMcf), and 1-2 letter words (B, SS, MP) are never masked.
+ *     The numbers inside masked tokens are still checked against stored number tokens.
  * False drops are accepted in the safe direction (e.g. "2 x 10 ft", "1 210 days", "1.2 mm", "H2S" not in evidence).
  */
 
@@ -66,13 +77,44 @@ export const NUMBER_SUFFIX_ALLOWLIST: ReadonlySet<string> = new Set([
 // 6+ letter runs after a number that are still magnitude units (MMbbls, MMscfd, Bcfd, Mcfd, kbopd...).
 const MAGNITUDE_PREFIX_RE = /^(?:mm|mb|kb|bn|bcf|tcf|mcf|msc|bsc|tsc)/;
 // Number words: hundred/thousand/dozen/...illion/lakh/crore anywhere in a word; tens words and their -ieth/-ies
-// forms anywhere except directly after "w" (weighty); grand/lac/thou only as whole words (grandfathered, place).
+// forms anywhere except directly after "w" (weighty);
+// grand/lac/thou, kilo/mega/giga/tera(barrels) and myriad only as whole letter runs (grandfathered, kilowatt are
+// not magnitudes); a digit directly before them still counts ("1.2kilobarrels").
 const NUMBER_WORD_RE =
-  /hundred|thousand|illion|dozen|lakh|crore|(?<!w)(?:twent|thirt|fort|fift|sixt|sevent|eight|ninet)(?:y|ie)|(?<![\p{L}\p{N}])(?:grands?|lacs?|thou)(?![\p{L}\p{N}])/iu;
-// Power and "times ten" notation: 2^3, 2**3, 2 x 10, 2 × 10, 2*10, 2·10. (Markdown bold "**210**" is allowed.)
+  /hundred|thousand|illion|dozen|lakh|crore|(?<!w)(?:twent|thirt|fort|fift|sixt|sevent|eight|ninet)(?:y|ie)|(?<!\p{L})(?:grands?|lacs?|thou|(?:kilo|mega|giga|tera)(?:barrels?|bbls?)?|myriads?)(?!\p{L})/iu;
+// Words that are never masked even when the cited evidence contains them: they can scale a number.
+const MAGNITUDE_WORDS: ReadonlySet<string> = new Set([
+  "k", "m", "b", "t", "g", "mm", "bn", "tn", "mn", "mln", "mio", "mrd", "md", "bil", "bln", "thou", "tsd", "lakh", "lakhs",
+  "lac", "lacs", "cr", "crore", "crores", "grand", "grands", "e", "x", "mcf", "bcf", "tcf", "score", "gross",
+]);
+const isMagnitudeLike = (word: string): boolean => {
+  const w = word.toLowerCase();
+  return MAGNITUDE_WORDS.has(w) || NUMBER_WORD_RE.test(w) || MAGNITUDE_PREFIX_RE.test(w) || /^(?:kilo|mega|giga|tera|myriad)/.test(w);
+};
+// Power and "times ten" notation: 2^3, 2 x 10, 2 × 10, 2·10 ("*" never reaches the gate: the sanitizer removes it).
 const POWER_RE = /\d\s*(?:\^|\*\*\s*[-+]?\d|[x\u00D7*\u00B7]\s*10)/i;
 // One space-like / apostrophe / underscore separator then exactly three digits: reads as 1 210 = 1210.
 const SPACE_GROUP_RE = /\d[\p{Zs}'\u2018\u2019_\u00B7\u2800]\d{3}(?!\d)/u;
+// Any run of characters between two digits that are not letters, whitespace or ASCII , . - / : % $ ( ) +
+// (look-alike decimal / grouping marks: 1·2, 1٫2, 1′210, 1∙210, U+FFFD). Dashes are folded to "-" first.
+const EXOTIC_SEP_RE = /\d[^\p{L}\p{N}\s,.\-/:%$()+]+\d/u;
+// Markdown markup directly between a digit and a digit/./, would join numbers once removed (1**.**2, 1`210).
+const MARKUP_JOIN_RE = /(?<=[0-9.,])[*`]+(?=[0-9])|(?<=[0-9])[*`]+(?=[.,])/g;
+const MARKUP_RE = /[*`]+/g;
+const JOINED = "\uFFFD";
+// Compound tokens (identifiers, part numbers, dates) and letter runs, for evidence masking.
+const COMPOUND_RE = /[A-Za-z0-9][A-Za-z0-9._/-]*/g;
+const LETTERS_RE = /\p{L}+/gu;
+const trimCompound = (m: string): string => {
+  let end = m.length; // loop, not /[._/-]+$/ (quadratic on long separator runs)
+  while (end > 0 && "._/-".includes(m[end - 1])) end--;
+  return m.slice(0, end);
+};
+// Only identifier-like compounds mask: a letter plus a digit or an inner separator (PL-100-G, RHBC-16, tv-ball).
+// Single words (k, mln) go through the 3+ letter word rule instead.
+const isIdentifierCompound = (core: string): boolean => /[A-Za-z]/.test(core) && /[0-9._/-]/.test(core);
+// Placeholder for masked text in the suffix scan; it cannot occur in checked text (U+FFFD is always dropped).
+const MASK = JOINED;
 // Any non-ASCII numeric character (fullwidth, Arabic-Indic, superscripts, fractions, roman numerals) is rejected.
 const NON_ASCII_NUMERIC_RE = /(?![0-9])\p{N}/u;
 const HIDDEN_RE = /[\p{Cf}\p{M}\p{Default_Ignorable_Code_Point}]/u;
@@ -128,13 +170,16 @@ const stripMarkers = (s: string): string => {
 };
 
 /**
- * The one canonical statement text: every control / space / line-separator run becomes one space, bracketed
- * numeric markers are removed, spaces collapsed, ends trimmed. Idempotent. parseModelOutput applies it before the
- * length cap; validateStatements checks exactly this text and composeAnswer displays exactly this text.
+ * The one canonical statement text: every control / space / line-separator run becomes one space; markdown that
+ * joins digits becomes U+FFFD (always dropped by the gate); every "*" and backtick is removed; bracketed numeric
+ * markers are removed; "[" / "]" become "(" / ")" so no link or bold syntax survives; spaces collapsed, ends trimmed.
+ * Idempotent. parseModelOutput applies it before the length cap; validateStatements checks exactly this text,
+ * composeAnswer displays exactly this text and the chat client renders it verbatim.
  */
 export function sanitizeStatementText(text: string): string {
   const composed = text.normalize("NFC").replace(EMOJI_VS_RE, ""); // NFC is canonical-equivalent: same rendering
-  return stripMarkers(composed.replace(SPACE_LIKE_RE, " ")).replace(/ {2,}/g, " ").trim();
+  const flat = composed.replace(SPACE_LIKE_RE, " ").replace(MARKUP_JOIN_RE, JOINED).replace(MARKUP_RE, "");
+  return stripMarkers(flat).replace(/\[/g, "(").replace(/\]/g, ")").replace(/ {2,}/g, " ").trim();
 }
 
 const normalizeNumber = (token: string): string => {
@@ -159,8 +204,9 @@ const prep = (text: string, stripHidden: boolean): string => {
 const numberTokens = (prepared: string): string[] => (prepared.match(NUMBER_RE) ?? []).map(normalizeNumber);
 const isLetter = (c: string): boolean => /\p{L}/u.test(c);
 const isDigitOrLetter = (c: string): boolean => /[\p{L}\p{N}]/u.test(c);
-// Characters that end the "what follows this number" scan: clause punctuation and closing brackets.
-const SCAN_STOP = new Set([",", ";", ":", "!", "?", ")", "]", "}"]);
+// Clause punctuation ends the "what follows this number" scan only when followed by whitespace or the end
+// ("6, Plunger"); attached ("1.2:k", "1.2!bn") or closing brackets ("(1.2)bn", "(1.2) bn") do not end it.
+const CLAUSE_STOP = new Set([",", ";", ":", "!", "?", "."]);
 
 /** Letter runs that follow a number, after zero or more separator characters (linear scan). */
 const suffixViolation = (t: string): boolean => {
@@ -170,8 +216,13 @@ const suffixViolation = (t: string): boolean => {
     let j = i + 1;
     // "5. Then" ends a sentence; any other run of non-letter, non-digit, non-stop characters is a separator.
     if (cs[j] === "." && (j + 1 >= cs.length || cs[j + 1] === " ")) continue;
-    while (j < cs.length && !isDigitOrLetter(cs[j]) && !SCAN_STOP.has(cs[j])) j++;
-    if (j >= cs.length || !isLetter(cs[j])) { i = j - 1; continue; }
+    let clause = false;
+    while (j < cs.length && !isDigitOrLetter(cs[j]) && cs[j] !== MASK) {
+      if (CLAUSE_STOP.has(cs[j]) && (j + 1 >= cs.length || /\s/.test(cs[j + 1]))) clause = true;
+      j++;
+    }
+    // a masked word (verbatim evidence token / identifier) is an allowed word: the scan ends there
+    if (clause || j >= cs.length || cs[j] === MASK || !isLetter(cs[j])) { i = j - 1; continue; }
     let k = j;
     while (k < cs.length && isLetter(cs[k])) k++;
     const run = cs.slice(j, k).join("").toLowerCase();
@@ -189,22 +240,32 @@ const numberGateFails = (
   text: string,
   evidenceNumbers: Set<string>,
   evidenceWords: Set<string>,
-  evidenceDotted: Set<string>
+  evidenceDotted: Set<string>,
+  evidenceCompounds: Set<string>,
+  evidenceLetterWords: Set<string>
 ): boolean => {
-  if (NON_ASCII_NUMERIC_RE.test(text) || HIDDEN_RE.test(text)) return true;
+  if (text.includes(JOINED) || NON_ASCII_NUMERIC_RE.test(text) || HIDDEN_RE.test(text)) return true;
   const nfkc = text.normalize("NFKC");
   if (HIDDEN_RE.test(nfkc)) return true;
   if ((text.match(ASCII_DIGITS_RE) ?? []).length !== (nfkc.match(ASCII_DIGITS_RE) ?? []).length) return true;
   const t = foldDashes(nfkc);
-  if (NUMBER_WORD_RE.test(t) || POWER_RE.test(t) || SPACE_GROUP_RE.test(t)) return true;
+  if (NUMBER_WORD_RE.test(t) || POWER_RE.test(t) || SPACE_GROUP_RE.test(t) || EXOTIC_SEP_RE.test(t)) return true;
   if ((t.match(DOTTED_RE) ?? []).some((d) => !evidenceDotted.has(d))) return true;
+  // compound tokens copied verbatim from cited evidence are masked; a trailing digit is kept so "PL-100 k" still fails
+  const compoundsMasked = t.replace(COMPOUND_RE, (m) => {
+    const core = trimCompound(m);
+    if (!isIdentifierCompound(core) || !evidenceCompounds.has(core.toLowerCase())) return m; // verbatim stored token
+    return `${MASK}${isAsciiDigit(core[core.length - 1]) ? "0" : ""}${m.slice(core.length)}`;
+  });
   // identifiers (letter first, contains a digit) must be copied verbatim from evidence; mask them for the suffix scan
   let identifierMissing = false;
-  const masked = t.replace(WORD_RE, (w) => {
+  const masked = compoundsMasked.replace(WORD_RE, (w) => {
     if (!/^\p{L}/u.test(w) || !/\d/.test(w)) return w;
     if (!evidenceWords.has(w.toLowerCase())) identifierMissing = true;
-    return "#";
-  });
+    return MASK;
+  }).replace(LETTERS_RE, (w) =>
+    w.length >= 3 && evidenceLetterWords.has(w.toLowerCase()) && !isMagnitudeLike(w) ? MASK : w
+  );
   if (identifierMissing || suffixViolation(masked)) return true;
   return numberTokens(t).some((n) => !evidenceNumbers.has(n));
 };
@@ -292,7 +353,12 @@ export function validateStatements(
     const evidenceNumbers = new Set(numberTokens(evText));
     const evidenceWords = new Set((evText.match(WORD_RE) ?? []).map((w) => w.toLowerCase()));
     const evidenceDotted = new Set(evText.match(DOTTED_RE) ?? []);
-    if (numberGateFails(statement.text, evidenceNumbers, evidenceWords, evidenceDotted)) { drop("NUMBER_MISMATCH"); continue; }
+    const evidenceCompounds = new Set((evText.match(COMPOUND_RE) ?? []).map((m) => trimCompound(m).toLowerCase()));
+    const evidenceLetterWords = new Set((evText.match(LETTERS_RE) ?? []).filter((w) => w.length >= 3).map((w) => w.toLowerCase()));
+    if (numberGateFails(statement.text, evidenceNumbers, evidenceWords, evidenceDotted, evidenceCompounds, evidenceLetterWords)) {
+      drop("NUMBER_MISMATCH");
+      continue;
+    }
     kept.push(statement);
   }
   return { kept, dropped };

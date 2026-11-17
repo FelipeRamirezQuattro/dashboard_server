@@ -1,4 +1,9 @@
 /// <reference types="node" />
+import fs from "fs";
+import path from "path";
+import { buildRecordCards } from "../../services/brain/recordCards";
+import { validateDataset } from "../../services/brain/datasetValidator";
+import { rodPumpFailureDefinition } from "../../services/brain/definitions/rodPumpFailure";
 import {
   GroundingError,
   buildGroundedPrompt,
@@ -248,5 +253,126 @@ for (const [e, t] of [["DEMO-001 days_run=210", "DEMO-001 ran 210 days"], ["wear
   expect(`happy ${JSON.stringify(t)}`, verdict(e, t), "KEPT");
 }
 
-if (failures.length) throw new Error(`${failures.length} round-4 fixture failures:\n${failures.join("\n")}`);
+// ---- round 5: markdown neutralised (checked text == rendered text), exotic separators, evidence-token masking.
+// Verbatim copy of the chat client's renderMessage regex (client-odessa/src/features/chatbot/ChatMessage.tsx):
+// a link [t](u) displays only t; bold **x** displays x.
+const CLIENT_RENDER_RE = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*/g;
+const clientRender = (text: string): string => {
+  const parts: string[] = [];
+  let lastIndex = 0;
+  const regex = new RegExp(CLIENT_RENDER_RE.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.substring(lastIndex, match.index));
+    if (match[1] && match[2]) parts.push(match[1]);
+    else if (match[3]) parts.push(match[3]);
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push(text.substring(lastIndex));
+  return parts.join("");
+};
+const numTok = (s: string): string[] => s.match(/\d+(?:[.,]\d+)*/g) ?? [];
+
+// 1. markdown that joins stored numbers into a different displayed number is dropped
+const EV_M = "a 1 b 2 c 210 d 1.2";
+for (const t of ["cost **1****210** days", "**1** **210** days", "1**,**210", "**1,**210", "cost 1**.**2", "**1.**2 wells",
+  "[a 1](u)210 days", "[1,](u)210", "cost [1.2](http://x)bn", "[1.2](u)k", "1`210", "1`.`2", "`1`210", "**2**10", "2**10**"]) {
+  expect(`R5-1 invalid ${JSON.stringify(t)}`, verdict(EV_M, t), D);
+}
+for (const [e, t, shown] of [["d 210", "**210** days", "210 days"], ["DEMO-001 days_run=210", "**DEMO-001** ran **210** days", "DEMO-001 ran 210 days"],
+  ["d 210", "ran `210` days", "ran 210 days"], ["d 210", "see [the card](u) 210 days", "see (the card)(u) 210 days"]]) {
+  const p = pipeline(e, t);
+  expect(`R5-1 valid ${JSON.stringify(t)}`, p.verdict, "KEPT");
+  expect(`R5-1 shown ${JSON.stringify(t)}`, clientRender(p.bullet), `- ${shown} [1]`);
+}
+if (sanitizeFn) {
+  for (const x of ["**a** `b` [c](d) [e] ]( *", "x **1** y", "[[1]](u)", "【*1*】", "a`[1]`b", "1**[1]**210"]) {
+    const s = sanitizeFn(x);
+    expect(`R5-1 sanitize strips markdown ${JSON.stringify(x)}`, /[*`[\]]/.test(s), false);
+    expect(`R5-1 sanitize idempotent ${JSON.stringify(x)}`, sanitizeFn(s), s);
+  }
+}
+
+// 2a. letters after a number are checked past closing brackets / attached punctuation
+for (const t of ["cost (1.2)bn", "cost [1.2]bn", "cost {1.2}bn", "cost 1.2)bn", "cost 1.2:k", "cost 1.2!bn", "cost 1.2;bn", "cost 1.2?k", "cost (1.2) bn"]) {
+  expect(`R5-2a invalid ${JSON.stringify(t)}`, verdict(EV_M, t), D);
+}
+for (const t of ["cost 1.2, and 2 wells", "wells 1; then 2", "(DEMO-001) ran 210 days", "ran 210 days: done"]) {
+  expect(`R5-2a valid ${JSON.stringify(t)}`, verdict(`${EV_M} DEMO-001`, t), "KEPT");
+}
+// 2b. any exotic punctuation/symbol between two digit runs is dropped
+for (const t of ["1`210", "1′210", "1՚210", "1‧210", "1∙210", "1⋅210", "1·2", "1⋅2", "1∙2", "1‧2", "1٫2",
+  "1˙210", "1´210", "1ʼ210", "1#210", "1~2", "1�2"]) {
+  expect(`R5-2b invalid ${JSON.stringify(t)}`, verdict(EV_M, t), D);
+}
+const EV_S = "x=3.5 cost 1,210 d=2024-03-15 e=03/15/2024 t=3:15 a=210 b=290";
+for (const t of ["3.5", "1,210", "2024-03-15", "03/15/2024", "3:15", "210–290", "210-290", "210 to 290", "3.5%", "$1,210"]) {
+  expect(`R5-2b valid ${JSON.stringify(t)}`, verdict(EV_S, t), "KEPT");
+}
+
+// 3. identifiers / words copied verbatim from the CITED evidence are not read as magnitude suffixes
+const sampleDir = path.resolve(__dirname, "../../../../docs/rod-pump-failure-sample-data");
+const sampleFiles: Record<string, string> = {};
+for (const n of ["cases", "components", "wear", "solids", "actions", "evidence"]) {
+  sampleFiles[`${n}.csv`] = fs.readFileSync(path.join(sampleDir, `${n}.csv`), "utf8");
+}
+const sampleCards = buildRecordCards(rodPumpFailureDefinition, validateDataset(rodPumpFailureDefinition, sampleFiles).rows);
+const SE: Evidence[] = sampleCards.flatMap((c) => c.rowEvidence.map((e) => ev(e.id, e.text)));
+const SP = "ds:rod_pump_failure/";
+const sv = (t: string, cit: string[]): string => {
+  const parsed = parseModelOutput(JSON.stringify({ statements: [{ text: t, citations: cit }] }));
+  const r = validateStatements(parsed, SE);
+  return r.kept.length ? "KEPT" : r.dropped[0].reason;
+};
+for (const [t, cit] of [
+  ["The DEMO-001 pump model is 20-125-RHBC-16-5-4.", [`${SP}cases/DEMO-001`]],
+  ["DEMO-003 used a 25-150-RHBC-16-5-4 pump.", [`${SP}cases/DEMO-003`]],
+  ["Plunger PL-100 was replaced by PL-100-G in DEMO-001.", [`${SP}components/DEMO-001-plunger`]],
+  ["Component DEMO-001-tv-ball leaked and did not hold vacuum.", [`${SP}components/DEMO-001-tv-ball`]],
+  ["Component DEMO-002-sv-cage was galled to the secondary cage.", [`${SP}components/DEMO-002-sv-cage`]],
+  ["Scale made up 3.8% FeS in the DEMO-002 sample.", [`${SP}solids/DEMO-002|scale_fes`]],
+] as [string, string[]][]) {
+  expect(`R5-3 valid ${JSON.stringify(t)}`, sv(t, cit), "KEPT");
+}
+for (const [t, cit] of [
+  ["The pump model is 20-125-RHBC-16-5-9.", [`${SP}cases/DEMO-001`]], // masked token still number-checked
+  ["The pump model is 20-125-RHBC-16-5-4 k.", [`${SP}cases/DEMO-001`]],
+  ["The pump model is 20-125-RHBC-16-5-4k.", [`${SP}cases/DEMO-001`]],
+  ["Plunger PL-999-G was used.", [`${SP}components/DEMO-001-plunger`]],
+  ["Plunger PL-100 G was used.", [`${SP}components/DEMO-001-plunger`]], // 1-2 letter evidence words are not masked
+  ["The DEMO-003 pump model is 20-125-RHBC-16-5-4.", [`${SP}cases/DEMO-003`]], // only CITED evidence masks
+  ["Scale made up 3.8 bn FeS.", [`${SP}solids/DEMO-002|scale_fes`]],
+] as [string, string[]][]) {
+  expect(`R5-3 invalid ${JSON.stringify(t)}`, sv(t, cit), D);
+}
+// evidence words never mask magnitude / number words
+for (const [e, t] of [["x=1.2 unit mln", "1.2 mln"], ["x=1.2 note kilobarrels", "1.2 kilobarrels"], ["x=1.2", "1.2 kilobarrels"], ["x=1.2", "1.2 kilo"],
+  ["x=1.2", "1.2 megabarrels"], ["x=1.2", "1.2 myriad"], ["x=1.2 myriad", "1.2 myriad"], ["x=1.2 unit thousand", "1.2 thousand"], ["x=1.2 Mbbl", "1.2 Mbbl"],
+  ["x=1.2 MMcf", "1.2 MMcf"], ["x=1.2 tsd", "1.2 tsd"], ["x=1.2", "1.2kilobarrels"], ["x=1.2", "(1.2kilobarrels"], ["x=1.2", "1.2myriad"]]) {
+  expect(`R5-3 magnitude never masked ${JSON.stringify(e)} / ${JSON.stringify(t)}`, verdict(e, t), D);
+}
+
+// compound trimming is linear (a run of trailing separators used to be quadratic)
+{
+  const t0 = Date.now();
+  validateStatements([{ text: "PL" + ".".repeat(100000) + "x", citations: ["q"] }], [ev("q", "PL" + "-".repeat(100000) + "x")]);
+  expect("R5 linear compound trim (< 1000 ms)", Date.now() - t0 < 1000, true);
+}
+
+// render invariant over the whole fixture corpus: for every KEPT statement the client displays exactly the checked text
+const corpus: [string, string][] = [
+  ...["cost **1****210** days", "**1** **210** days", "1**,**210", "**1,**210", "cost 1**.**2", "**1.**2 wells", "[a 1](u)210 days", "[1,](u)210",
+    "cost [1.2](http://x)bn", "[1.2](u)k", "**210** days", "ran `210` days", "[1](u)[210](v) days", "[1](u)210 days", "x [1] y", "**a** 1 **b** 2",
+    "2 [**1**](u) 10", "a [b](c) [d](e) 210", "1 [x](**210**)", "[*1*](u)", "**[1](u)**210"].map((t): [string, string] => [EV_M, t]),
+  ...[...Array(10).keys()].map((i): [string, string] => [EV_S, ["3.5", "1,210", "2024-03-15", "03/15/2024", "3:15", "210–290", "a **3.5** b", "[3.5](x)", "`1,210`", "**210**-**290**"][i]]),
+];
+for (const [e, t] of corpus) {
+  const p = pipeline(e, t);
+  if (p.verdict !== "KEPT") continue;
+  const shown = clientRender(p.bullet);
+  expect(`R5 render == checked ${JSON.stringify(t)}`, shown, `- ${p.checked} [1]`);
+  expect(`R5 rendered numbers == checked numbers ${JSON.stringify(t)}`, numTok(shown.replace(/ \[1\]$/, "")), numTok(p.checked));
+}
+
+if (failures.length) throw new Error(`${failures.length} round-4/5 fixture failures:\n${failures.join("\n")}`);
 console.log("grounding fixtures passed");
