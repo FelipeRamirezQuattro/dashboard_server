@@ -4,6 +4,7 @@ import {
   BrainEntity,
   BrainInsight,
   BrainMemory,
+  NON_CHUNK_MEMORY_FILTER,
   BrainUnknownArea,
   BrainWorkflowEdge,
   BrainWorkflowStep,
@@ -41,7 +42,7 @@ export const getCategoryState = async (
     unknownAreas,
     designOutputs,
   ] = await Promise.all([
-    BrainMemory.find({ categoryId, type: { $ne: "document_chunk" } })
+    BrainMemory.find({ categoryId, ...NON_CHUNK_MEMORY_FILTER })
       .select("-embedding")
       .sort({ createdAt: -1 }).limit(100),
     BrainEntity.find({ categoryId }).sort({ name: 1 }),

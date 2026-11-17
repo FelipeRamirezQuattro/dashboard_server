@@ -81,7 +81,10 @@ const documentSchema = new Schema<IBrainDocument>(
   },
   { timestamps: true },
 );
-documentSchema.index({ categoryId: 1, contentHash: 1 }, { unique: true });
+// Deliberately NOT unique: re-uploading content identical to an ARCHIVED document must be allowed
+// (restore old version). The Task 11 service rejects duplicates only against status in
+// ["draft","active"]. No partialFilterExpression ($ne unsupported, $in is Mongo-version dependent).
+documentSchema.index({ categoryId: 1, contentHash: 1, status: 1 });
 
 // ---------- BrainDatasetDefinitionRecord ----------
 export interface IBrainDatasetDefinitionRecord extends Document {

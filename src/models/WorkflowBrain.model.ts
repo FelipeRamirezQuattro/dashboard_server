@@ -20,6 +20,9 @@ export type BrainMemoryType =
   | "document_chunk";
 
 export type BrainMemorySource = "memory" | "workflow" | "design" | "system" | "document";
+/** Filter fragment for memory listing / edit / delete: document chunks are never UI/chat memories. */
+export const NON_CHUNK_MEMORY_FILTER = { type: { $ne: "document_chunk" } } as const;
+
 export type BrainAccessRole = "viewer" | "editor" | "admin";
 export type BrainGroundingMode = "strict" | "standard";
 export type BrainSeverity = "low" | "medium" | "high";

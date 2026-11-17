@@ -5,6 +5,8 @@ import {
   roleMeets,
 } from "../../services/brain/access";
 
+import { roleHierarchy } from "../../utils/roleHierarchy";
+
 const assert = (condition: unknown, message: string): void => {
   if (!condition) throw new Error(message);
 };
@@ -12,7 +14,12 @@ const assert = (condition: unknown, message: string): void => {
 type Role = "viewer" | "editor" | "admin" | "superadmin";
 const roles: Role[] = ["viewer", "editor", "admin", "superadmin"];
 const mins = ["viewer", "editor", "admin"] as const;
-const rank: Record<string, number> = { viewer: 1, editor: 2, admin: 3, superadmin: 4 };
+const rank: Record<string, number> = roleHierarchy;
+
+assert(
+  JSON.stringify(roleHierarchy) === JSON.stringify({ viewer: 1, editor: 2, admin: 3, superadmin: 4 }),
+  "shared roleHierarchy values pinned",
+);
 
 for (const role of roles) {
   for (const min of mins) {

@@ -1,13 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { UserRole } from "../models/User.model";
 import logger from "../utils/logger";
+import { roleHierarchy } from "../utils/roleHierarchy";
 
-const roleHierarchy: Record<UserRole, number> = {
-  viewer: 1,
-  editor: 2,
-  admin: 3,
-  superadmin: 4,
-};
 
 export const requireRole = (requiredRole: UserRole | UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {

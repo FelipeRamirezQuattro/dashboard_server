@@ -109,9 +109,9 @@ const categorySettingsSchema = z
   .partial()
   .strict();
 
-type CategorySettings = z.infer<typeof categorySettingsSchema>;
+export type CategorySettings = z.infer<typeof categorySettingsSchema>;
 
-const parseSettings = (input: Record<string, unknown>): CategorySettings => {
+export const parseSettings = (input: Record<string, unknown>): CategorySettings => {
   const picked: Record<string, unknown> = {};
   for (const key of ["accessRole", "groundingMode", "minEvidenceCount"]) {
     if (input[key] !== undefined) picked[key] = input[key];
@@ -127,6 +127,12 @@ const parseSettings = (input: Record<string, unknown>): CategorySettings => {
   return result.data;
 };
 
+/** New categories default to strict grounding unless the caller explicitly provided a mode. */
+export const resolveNewCategorySettings = (input: Record<string, unknown>): CategorySettings => {
+  const settings = parseSettings(input);
+  return { ...settings, groundingMode: settings.groundingMode ?? "strict" };
+};
+
 export const createCategory = async (
   data: {
     name: string;
@@ -138,13 +144,12 @@ export const createCategory = async (
   },
   userId: string,
 ) => {
-  const settings = parseSettings(data);
+  const settings = resolveNewCategorySettings(data);
   return WorkflowBrainCategory.create({
     name: data.name,
     description: data.description || "",
     domain: data.domain || "general",
     ...settings,
-    groundingMode: settings.groundingMode ?? "strict",
     createdBy: userId,
     updatedBy: userId,
   });
