@@ -34,15 +34,19 @@ const NUMBER_RE = /(?:(?<![\p{L}\p{N}])-)?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|
  *  2. A letter run that follows a number (after zero or more separators) is an ALLOWLIST check: 1-5 letters must be
  *     in NUMBER_SUFFIX_ALLOWLIST (units, ordinals, common short words); 6+ letters are words and pass unless they
  *     contain a number-word stem or start with an oilfield magnitude prefix (mm..., bcf...). This subsumes
- *     magnitude suffixes (k, bn, mln, G, ...), e-notation (2e3) and "x" in 2x10.
- *  3. Power / times-ten notation (2^3, 2 x 10, 2·10) and number words (hundred, ...illion, lakh, kilobarrels, ...).
+ *     magnitude suffixes (k, bn, mln, G, ...), e-notation (2e3) and "x" in 2x10. Magnitude-like words (MAGNITUDE_WORDS,
+ *     number-word stems, oilfield prefixes) are never allowed directly after a number, nor after masked words that
+ *     follow a number ("1.2 USD mln"), nor anywhere later in the same clause ("1.2 dollars mln"; a clause ends at
+ *     "; " or ". " + non-lower-case; LATER_RUN_EXEMPT prose words and contraction tails excepted).
+ *  3. Power / times-ten notation (2^3, 2 x 10, 2·10, 1.2 ⋅ 10 and other look-alike times glyphs) and number words
+ *     (hundred, ...illion, lakh, kilobarrels, ...).
  *  4. A single space-like separator followed by exactly three digits ("1 210") reads as thousands grouping, and
  *     any other character between two digit runs that is not a letter or one of space , . - / : % $ ( ) +
  *     (1·2, 1٫2, 1′210, 1∙210) reads as a look-alike decimal or grouping mark.
  *  5. A word that starts with a letter and contains a digit (identifier: v2k, id3e4f) must appear verbatim in the
  *     cited evidence; otherwise it could be a currency/magnitude form (EUR2k) or a digit look-alike (l0).
  *  6. Masking (rules 2-3 only): a compound token [A-Za-z0-9][A-Za-z0-9._/-]* copied verbatim from the cited evidence
- *     (20-125-RHBC-16-5-4, PL-100-G, DEMO-001-tv-ball) and a 3+ letter word that is a whole word of the cited
+ *     with IDENTICAL CASE (20-125-RHBC-16-5-4, PL-100-G, DEMO-001-tv-ball; "1.2mm" never masks "1.2MM") and a 3+ letter word that is a whole word of the cited
  *     evidence (FeS from scale_fes) are not read as suffixes; such a word never masks when it looks like a
  *     magnitude/number word (mln, tsd, kilobarrels, MMcf), and 1-2 letter words (B, SS, MP) are never masked.
  *     The numbers inside masked tokens are still checked against stored number tokens.
@@ -85,14 +89,22 @@ const NUMBER_WORD_RE =
 // Words that are never masked even when the cited evidence contains them: they can scale a number.
 const MAGNITUDE_WORDS: ReadonlySet<string> = new Set([
   "k", "m", "b", "t", "g", "mm", "bn", "tn", "mn", "mln", "mio", "mrd", "md", "bil", "bln", "thou", "tsd", "lakh", "lakhs",
-  "lac", "lacs", "cr", "crore", "crores", "grand", "grands", "e", "x", "mcf", "bcf", "tcf", "score", "gross",
+  "lac", "lacs", "lks", "cr", "crs", "crore", "crores", "grand", "grands", "e", "x", "mcf", "bcf", "tcf", "gcf", "score", "gross",
+  "mds", "mill", "mills", "large", "kft", "klbs", "mlbs", "bio", "millones", "millon", "millón", "milliard", "milliards",
+  "miljoen", "miljard", "tril", "trn", "bbn", "bbbl", "gig", "gigs", "mille", "bcm", "tcm", "man", "млн", "тыс", "млрд", "трлн", "тысяч",
 ]);
+// Later in a clause (not directly after a number) these common prose words are not read as magnitudes
+// ("e.g.", "a large pump", "a grand total"); directly after a number they still are ("5 large", "2e3").
+const LATER_RUN_EXEMPT: ReadonlySet<string> = new Set(["e", "large", "grand", "grands", "gross", "score", "gig", "gigs", "man"]);
 const isMagnitudeLike = (word: string): boolean => {
   const w = word.toLowerCase();
-  return MAGNITUDE_WORDS.has(w) || NUMBER_WORD_RE.test(w) || MAGNITUDE_PREFIX_RE.test(w) || /^(?:kilo|mega|giga|tera|myriad)/.test(w);
+  return MAGNITUDE_WORDS.has(w) || NUMBER_WORD_RE.test(w) || MAGNITUDE_PREFIX_RE.test(w) ||
+    /^(?:kilo|mega|giga|tera|myriad)/.test(w) || /[万萬亿億千百兆]/u.test(w);
 };
 // Power and "times ten" notation: 2^3, 2 x 10, 2 × 10, 2·10 ("*" never reaches the gate: the sanitizer removes it).
-const POWER_RE = /\d\s*(?:\^|\*\*\s*[-+]?\d|[x\u00D7*\u00B7]\s*10)/i;
+// Look-alike multiplication glyphs (∗ ∙ ⋅ ⋆ ✕ ✖ ⨉ ⨯ ╳), single or doubled, between two numbers.
+const POWER_RE =
+  /\d\s*(?:\^|\*\*\s*[-+]?\d|[x\u00D7*\u00B7]\s*10|[\u2217\u2219\u22C5\u22C6\u2715\u2716\u2A09\u2A2F\u2573]+\s*[-+]?\d)/i;
 // One space-like / apostrophe / underscore separator then exactly three digits: reads as 1 210 = 1210.
 const SPACE_GROUP_RE = /\d[\p{Zs}'\u2018\u2019_\u00B7\u2800]\d{3}(?!\d)/u;
 // Any run of characters between two digits that are not letters, whitespace or ASCII , . - / : % $ ( ) +
@@ -203,31 +215,70 @@ const prep = (text: string, stripHidden: boolean): string => {
 };
 const numberTokens = (prepared: string): string[] => (prepared.match(NUMBER_RE) ?? []).map(normalizeNumber);
 const isLetter = (c: string): boolean => /\p{L}/u.test(c);
-const isDigitOrLetter = (c: string): boolean => /[\p{L}\p{N}]/u.test(c);
 // Clause punctuation ends the "what follows this number" scan only when followed by whitespace or the end
 // ("6, Plunger"); attached ("1.2:k", "1.2!bn") or closing brackets ("(1.2)bn", "(1.2) bn") do not end it.
 const CLAUSE_STOP = new Set([",", ";", ":", "!", "?", "."]);
 
-/** Letter runs that follow a number, after zero or more separator characters (linear scan). */
+// A clause ends at "." followed by the end or by a space and a non-lower-case character ("days. Then"), or at ";"
+// followed by a space or the end. Text is already flattened, so newlines are spaces. "U.S. mln" does not end a clause.
+const endsClause = (cs: string[], i: number): boolean => {
+  if (cs[i] === ";") return i + 1 >= cs.length || cs[i + 1] === " ";
+  if (cs[i] !== ".") return false;
+  if (i + 1 >= cs.length) return true;
+  return cs[i + 1] === " " && (i + 2 >= cs.length || !/\p{Ll}/u.test(cs[i + 2]));
+};
+const APOSTROPHES = new Set(["'", "’"]);
+
+/**
+ * Letter runs after numbers, in one linear pass (masked words are U+FFFD):
+ *  - a run that directly follows a number (after separators only) must be allowlisted (1-5 letters) and never
+ *    magnitude-like ("1.2 bn", "1.2 large");
+ *  - a run that follows masked words that directly follow a number must never be magnitude-like, with no exemptions
+ *    ("1.2 USD mln", "1.2FeS bn", "1.2 FeS large"); the allowlist is not applied there ("95 days due", "6 mil between");
+ *  - every later run in the same clause (the clause has a number before it) must not be magnitude-like
+ *    ("cost $1.2 total mln", "1.2 dollars mln"); contraction tails (didn't) and LATER_RUN_EXEMPT words are skipped.
+ */
 const suffixViolation = (t: string): boolean => {
   const cs = Array.from(t);
-  for (let i = 0; i < cs.length; i++) {
-    if (!isAsciiDigit(cs[i]) || (i + 1 < cs.length && isAsciiDigit(cs[i + 1]))) continue;
-    let j = i + 1;
-    // "5. Then" ends a sentence; any other run of non-letter, non-digit, non-stop characters is a separator.
-    if (cs[j] === "." && (j + 1 >= cs.length || cs[j + 1] === " ")) continue;
-    let clause = false;
-    while (j < cs.length && !isDigitOrLetter(cs[j]) && cs[j] !== MASK) {
-      if (CLAUSE_STOP.has(cs[j]) && (j + 1 >= cs.length || /\s/.test(cs[j + 1]))) clause = true;
-      j++;
+  const n = cs.length;
+  let inClause = false; // a number has been seen in the current clause
+  let direct = false; // the next letter run directly follows a number (possibly through masked words)
+  let viaMask = false; // ... and a masked word sits between the number and the run
+  let i = 0;
+  while (i < n) {
+    const c = cs[i];
+    if (isAsciiDigit(c)) {
+      while (i < n && isAsciiDigit(cs[i])) i++;
+      inClause = true;
+      direct = true;
+      viaMask = false;
+      continue;
     }
-    // a masked word (verbatim evidence token / identifier) is an allowed word: the scan ends there
-    if (clause || j >= cs.length || cs[j] === MASK || !isLetter(cs[j])) { i = j - 1; continue; }
-    let k = j;
-    while (k < cs.length && isLetter(cs[k])) k++;
-    const run = cs.slice(j, k).join("").toLowerCase();
-    if (run.length <= 5 ? !NUMBER_SUFFIX_ALLOWLIST.has(run) : MAGNITUDE_PREFIX_RE.test(run)) return true;
-    i = k - 1;
+    if (c === MASK) { viaMask = direct; i++; continue; } // a masked word keeps the "directly follows" chain alive
+    if (isLetter(c)) {
+      let k = i;
+      while (k < n && isLetter(cs[k])) k++;
+      const run = cs.slice(i, k).join("").toLowerCase();
+      if (direct && viaMask) {
+        if (isMagnitudeLike(run)) return true;
+      } else if (direct) {
+        if (isMagnitudeLike(run) || (run.length <= 5 && !NUMBER_SUFFIX_ALLOWLIST.has(run))) return true;
+      } else if (inClause && !LATER_RUN_EXEMPT.has(run) && isMagnitudeLike(run)) {
+        const contraction = i >= 2 && APOSTROPHES.has(cs[i - 1]) && isLetter(cs[i - 2]);
+        const eg = run === "g" && cs[i - 1] === "." && (cs[i - 2] === "e" || cs[i - 2] === "E") && !(i >= 3 && isLetter(cs[i - 3]));
+        if (!contraction && !eg) return true;
+      }
+      direct = false;
+      viaMask = false;
+      i = k;
+      continue;
+    }
+    // separators: clause punctuation followed by whitespace/end ends the "directly follows" chain ("6, Plunger");
+    // attached punctuation and closing brackets do not ("1.2:k", "(1.2)bn").
+    if (CLAUSE_STOP.has(c) && (i + 1 >= n || /\s/.test(cs[i + 1]))) direct = false;
+    if (endsClause(cs, i)) { inClause = false; direct = false; }
+    else if (/\p{N}/u.test(c)) direct = false; // non-ASCII numerics are rejected before this scan
+    i++;
   }
   return false;
 };
@@ -251,13 +302,15 @@ const numberGateFails = (
   const t = foldDashes(nfkc);
   if (NUMBER_WORD_RE.test(t) || POWER_RE.test(t) || SPACE_GROUP_RE.test(t) || EXOTIC_SEP_RE.test(t)) return true;
   if ((t.match(DOTTED_RE) ?? []).some((d) => !evidenceDotted.has(d))) return true;
-  // compound tokens copied verbatim from cited evidence are masked; a trailing digit is kept so "PL-100 k" still fails
+  // compound tokens copied verbatim (exact case: "1.2mm" never masks "1.2MM") from cited evidence are masked; a
+  // trailing digit is kept so "PL-100 k" still fails
   const compoundsMasked = t.replace(COMPOUND_RE, (m) => {
     const core = trimCompound(m);
-    if (!isIdentifierCompound(core) || !evidenceCompounds.has(core.toLowerCase())) return m; // verbatim stored token
+    if (!isIdentifierCompound(core) || !evidenceCompounds.has(core)) return m; // verbatim stored token
     return `${MASK}${isAsciiDigit(core[core.length - 1]) ? "0" : ""}${m.slice(core.length)}`;
   });
-  // identifiers (letter first, contains a digit) must be copied verbatim from evidence; mask them for the suffix scan
+  // identifiers (letter first, contains a digit) must be copied verbatim (any case: a letter-first word cannot turn
+  // the number before it into a magnitude) from evidence; mask them for the suffix scan
   let identifierMissing = false;
   const masked = compoundsMasked.replace(WORD_RE, (w) => {
     if (!/^\p{L}/u.test(w) || !/\d/.test(w)) return w;
@@ -353,7 +406,7 @@ export function validateStatements(
     const evidenceNumbers = new Set(numberTokens(evText));
     const evidenceWords = new Set((evText.match(WORD_RE) ?? []).map((w) => w.toLowerCase()));
     const evidenceDotted = new Set(evText.match(DOTTED_RE) ?? []);
-    const evidenceCompounds = new Set((evText.match(COMPOUND_RE) ?? []).map((m) => trimCompound(m).toLowerCase()));
+    const evidenceCompounds = new Set((evText.match(COMPOUND_RE) ?? []).map((m) => trimCompound(m))); // exact case
     const evidenceLetterWords = new Set((evText.match(LETTERS_RE) ?? []).filter((w) => w.length >= 3).map((w) => w.toLowerCase()));
     if (numberGateFails(statement.text, evidenceNumbers, evidenceWords, evidenceDotted, evidenceCompounds, evidenceLetterWords)) {
       drop("NUMBER_MISMATCH");

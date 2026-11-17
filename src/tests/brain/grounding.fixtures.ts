@@ -195,7 +195,9 @@ const EV_A = "cost=1.2 wells=1 k=2";
 for (const t of ["cost 1.2[1]bn", "cost 1.2  bn", "cost 1.2\n\nbn", "cost 2[1]k", "cost 1.2[ 1 ]e3", "cost 1.2\u2028bn", "cost 1.2\u0085bn", "cost 1.2\u2029bn", "cost 1.2\u3000bn", "cost 1.2\u001Fbn", "cost 1.2\uFF3B1\uFF3Dbn"]) {
   expect(`A invalid ${JSON.stringify(t)}`, verdict(EV_A, t), D);
 }
-for (const t of ["cost 1.2 [1] total", "wells 1\n\nand k 2", "cost [ 1 ]1.2", "k\u20282 [12] wells 1"]) {
+// round 6: "wells 1\n\nand k 2" now drops ("k" later in a clause with a number reads as a magnitude, see R6-I2);
+// the flattening case uses a non-magnitude label instead.
+for (const t of ["cost 1.2 [1] total", "wells 1\n\nand cost 1.2", "cost [ 1 ]1.2", "k\u20282 [12] wells 1"]) {
   const p = pipeline(EV_A, t);
   expect(`A valid ${JSON.stringify(t)}`, p.verdict, "KEPT");
   expect(`A bullet == checked ${JSON.stringify(t)}`, p.bullet, `- ${p.checked} [1]`);
@@ -374,5 +376,45 @@ for (const [e, t] of corpus) {
   expect(`R5 rendered numbers == checked numbers ${JSON.stringify(t)}`, numTok(shown.replace(/ \[1\]$/, "")), numTok(p.checked));
 }
 
-if (failures.length) throw new Error(`${failures.length} round-4/5 fixture failures:\n${failures.join("\n")}`);
+// ---- round 6 (Task 8 addendum): masking and magnitude holes I1-I4.
+// I1: compound tokens are masked only on an exact, case-sensitive match with the cited evidence.
+for (const [e, t] of [["wear 1.2mm", "Cost was 1.2MM"], ["wear 1.2mm", "Cost was $1.2MM"], ["len 5m", "len 5M"], ["x 1.5t", "x 1.5T"],
+  ["d 2b", "d 2B"], ["w 10g", "w 10G"], ["wear 1.2-mm", "wear 1.2-MM"], ["x=1.2 tag A-MM", "1.2A-MM"], ["x=1.2 tag 1.2-MM", "1.2-mm"]]) {
+  expect(`R6-I1 invalid ${JSON.stringify(e)} / ${JSON.stringify(t)}`, verdict(e, t), D);
+}
+for (const [e, t] of [["wear 1.2mm", "wear 1.2mm"], ["len 5m", "len 5m"], ["wear 1.2-mm", "wear 1.2-mm"], ["id v2k", "id v2k"]]) {
+  expect(`R6-I1 valid ${JSON.stringify(e)} / ${JSON.stringify(t)}`, verdict(e, t), "KEPT");
+}
+// I2: a masked word does not end the scan; every later letter run in the clause is checked for magnitude.
+for (const [e, t] of [["cost=1.2 USD", "cost 1.2 USD mln"], ["cost=1.2 USD", "cost 1.2 USD bn"], ["x=1.2 Euro", "1.2 Euro mln"],
+  ["x=1.2 FeS", "1.2 FeS k"], ["x=1.2 FeS", "1.2FeS bn"], ["cost=1.2", "cost $1.2 total mln"], ["cost=1.2", "1.2 dollars mln"],
+  ["cost=1.2 USD", "cost 1.2 USD, mln"], ["cost=1.2", "cost 1.2 U.S. mln"], ["cost=1.2 USD", "cost 1.2 USD (in mln)"], ["cost=1.2", "1.2 dollars k"],
+  ["cost=1.2 wells=1 k=2", "wells 1\n\nand k 2"], ["cost=1.2", "cost 1.2, e.g. bn"], ["cost=1.2", "cost 1.2 USD Mln"]]) {
+  expect(`R6-I2 invalid ${JSON.stringify(e)} / ${JSON.stringify(t)}`, verdict(e, t), D);
+}
+for (const [e, t] of [["cost=1.2 USD", "cost 1.2 USD"], ["cost=1.2 USD", "cost 1.2 USD in total"], ["x=210", "ran 210 days. M wells were pulled"],
+  ["x=210", "ran 210 days; k was not measured"], ["x=210", "ran 210 days but didn't fail"], ["x=210", "ran 210 days, e.g. longer"]]) {
+  expect(`R6-I2 valid ${JSON.stringify(e)} / ${JSON.stringify(t)}`, verdict(e, t), "KEPT");
+}
+// I3: magnitude words are never masked or exempted, even when the cited evidence contains them.
+for (const w of ["mill", "large", "kft", "klbs", "Mlbs", "bio", "mds", "millones", "milliard", "milliards", "miljoen", "tril", "trn", "bbn",
+  "Bbbl", "Gcf", "gig", "mille", "crs", "lks", "млн", "тыс", "млрд", "mln", "bn", "tsd", "lakh", "crore", "MMcf"]) {
+  expect(`R6-I3 never masked ${w}`, verdict(`x=1.2 ${w}`, `cost 1.2 ${w}`), D);
+  expect(`R6-I3 never allowed ${w}`, verdict("x=1.2", `cost 1.2 ${w}`), D);
+}
+// I4: look-alike multiplication glyphs are power / times notation.
+for (const t of ["1.2 ⋅ 10", "1.2 ∙ 10", "1.2 ∗ 10", "1.2 ✕ 10", "2 ∗∗ 10", "1.2✖ 10", "1.2 ⨉ 10", "1.2 ⨯ 10",
+  "1.2 ╳ 10", "1.2 ⋆ 10", "2 ⋅ 3"]) {
+  expect(`R6-I4 invalid ${JSON.stringify(t)}`, verdict("x=1.2 y=2 z=10 w=3", t), D);
+}
+// timing: every touched regex / scan at 100k chars
+for (const [name, s] of [["clause", "1 a ".repeat(25000)], ["mask", "1.2 USD ".repeat(12500)], ["glyph", "1 ⋅".repeat(33000)],
+  ["spaces", "1" + " ".repeat(100000) + "⋅"], ["apostrophe", "1 a'b".repeat(20000)], ["dots", "1 a. b".repeat(16000)]] as [string, string][]) {
+  const t0 = Date.now();
+  validateStatements([{ text: s, citations: ["q"] }], [ev("q", "x=1 y=1.2 USD a b")]);
+  const ms = Date.now() - t0;
+  expect(`R6 timing ${name} < 100 ms (${ms} ms)`, ms < 100, true);
+}
+
+if (failures.length) throw new Error(`${failures.length} round-4/5/6 fixture failures:\n${failures.join("\n")}`);
 console.log("grounding fixtures passed");
