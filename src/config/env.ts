@@ -23,6 +23,9 @@ interface EnvConfig {
   // AI Chatbot Configuration (Optional)
   openaiApiKey?: string;
   openaiModel?: string;
+  brainEmbeddingModel: string;
+  brainEmbeddingVersion: string;
+  brainAnswerModel: string;
   anthropicApiKey?: string;
   enableAiFallback: boolean;
   // External app chatbot service-to-service API keys (Optional)
@@ -107,6 +110,13 @@ export const env: EnvConfig = {
   // AI Chatbot Configuration (Optional - enables AI fallback)
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+  brainEmbeddingModel:
+    process.env.BRAIN_EMBEDDING_MODEL || "text-embedding-3-small",
+  brainEmbeddingVersion: process.env.BRAIN_EMBEDDING_VERSION || "1",
+  brainAnswerModel:
+    process.env.BRAIN_ANSWER_MODEL ||
+    process.env.OPENAI_MODEL ||
+    "gpt-4o-mini",
   enableAiFallback:
     process.env.ENABLE_AI_FALLBACK?.toLowerCase() === "true" || false,
   // External app chatbot service-to-service API keys (Optional)

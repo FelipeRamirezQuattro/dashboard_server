@@ -136,5 +136,11 @@ router.get(
   requireCategoryAccess("categoryId"),
   knowledge.getDatasetTemplate,
 );
+router.post(
+  "/categories/:categoryId/reindex",
+  requireRole("admin"),
+  requireCategoryAccess("categoryId"),
+  knowledge.postReindex,
+);
 
 export default router;

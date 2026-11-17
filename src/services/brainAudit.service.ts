@@ -8,6 +8,7 @@ export type BrainAuditAction =
   | "BRAIN_DATASET_IMPORT_DRYRUN"
   | "BRAIN_DATASET_IMPORT_COMMITTED"
   | "BRAIN_DATASET_IMPORT_ROLLED_BACK"
+  | "BRAIN_REINDEX_REQUESTED"
   | "BRAIN_ACCESS_DENIED"
   | "BRAIN_ANSWER_INSUFFICIENT_EVIDENCE";
 
@@ -20,6 +21,8 @@ const ALLOWED_KEYS = [
   "counts",
   "rows",
   "issues",
+  "documents",
+  "batches",
 ] as const;
 const MAX_STRING_LENGTH = 80;
 

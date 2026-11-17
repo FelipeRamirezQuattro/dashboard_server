@@ -24,6 +24,7 @@ import {
   rollbackImport,
   parseDefinition,
 } from "../services/brain/datasets.service";
+import { reindexCategory } from "../services/brain/indexer.service";
 import { MAX_CSV_BYTES } from "../services/brain/csv";
 import { recordBrainAudit } from "../services/brainAudit.service";
 import logger from "../utils/logger";
@@ -366,6 +367,23 @@ export const getDatasetTemplate = async (req: Request, res: Response): Promise<v
       res.destroy();
       return;
     }
+    sendError(res, error);
+  }
+};
+
+export const postReindex = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const counts = await reindexCategory(req.params.categoryId);
+    await recordBrainAudit({
+      userId: req.user!._id.toString(),
+      action: "BRAIN_REINDEX_REQUESTED",
+      target: "brain_category",
+      metadata: { categoryId: req.params.categoryId, documents: counts.documents, batches: counts.batches },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+    res.status(202).json(counts);
+  } catch (error) {
     sendError(res, error);
   }
 };
