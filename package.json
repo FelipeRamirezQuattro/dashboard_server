@@ -10,7 +10,8 @@
     "seed": "ts-node src/seeds/seed.ts",
     "seed:hierarchy": "ts-node src/seeds/seedHierarchy.ts",
     "lint": "eslint src --ext .ts",
-    "test:brain": "ts-node src/tests/brain/run.ts"
+    "test:brain": "ts-node src/tests/brain/run.ts",
+    "brain:rodpump": "ts-node src/scripts/registerRodPumpBrain.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
