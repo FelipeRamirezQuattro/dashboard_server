@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { env } from "../config/env";
 import { requireCategoryState } from "./workflowBrainState.service";
 import logger from "../utils/logger";
+import { normalize, tokensFor } from "./brain/text";
 
 const summarizeItems = (items: unknown[], limit: number): unknown[] =>
   items.slice(0, limit).map((item) => {
@@ -16,46 +17,6 @@ const summarizeItems = (items: unknown[], limit: number): unknown[] =>
       status: object.status,
     };
   });
-
-const stopWords = new Set([
-  "a",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "by",
-  "for",
-  "from",
-  "how",
-  "is",
-  "it",
-  "of",
-  "on",
-  "or",
-  "the",
-  "to",
-  "what",
-  "when",
-  "where",
-  "who",
-  "whos",
-  "whose",
-  "why",
-]);
-
-const normalize = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-const tokensFor = (value: string) =>
-  normalize(value)
-    .split(/\s+/)
-    .filter((token) => token.length > 2 && !stopWords.has(token));
 
 const memoryContent = (memory: unknown) => {
   if (!memory || typeof memory !== "object") return "";
