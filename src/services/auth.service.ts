@@ -1,6 +1,10 @@
 import User, { IUser } from "../models/User.model";
 import RefreshToken from "../models/RefreshToken.model";
-import { generateAccessToken, generateRefreshToken } from "../utils/jwt.utils";
+import {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+} from "../utils/jwt.utils";
 import logger from "../utils/logger";
 
 export interface LoginResponse {
@@ -70,17 +74,30 @@ export const loginWithCredentials = async (
 export const refreshAccessToken = async (
   refreshToken: string,
 ): Promise<{ accessToken: string }> => {
-  const tokenRecord = await RefreshToken.findOne({
-    expiresAt: { $gte: new Date() },
-  }).select("+token");
-
-  if (!tokenRecord) {
+  // Stored tokens are bcrypt-hashed, so scope the lookup to the token owner taken
+  // from the signed JWT. Without the userId filter findOne returned an arbitrary
+  // user's record and every other user's refresh failed, forcing a re-login.
+  let userId: string;
+  try {
+    userId = verifyRefreshToken(refreshToken).userId;
+  } catch {
     throw new Error("Invalid refresh token");
   }
 
-  const isValid = await tokenRecord.compareToken(refreshToken);
+  const tokenRecords = await RefreshToken.find({
+    userId,
+    expiresAt: { $gte: new Date() },
+  }).select("+token");
 
-  if (!isValid) {
+  let tokenRecord = null;
+  for (const record of tokenRecords) {
+    if (await record.compareToken(refreshToken)) {
+      tokenRecord = record;
+      break;
+    }
+  }
+
+  if (!tokenRecord) {
     throw new Error("Invalid refresh token");
   }
 

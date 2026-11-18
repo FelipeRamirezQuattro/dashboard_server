@@ -3,6 +3,7 @@ import { OIDCStrategy, IProfile, VerifyCallback } from "passport-azure-ad";
 import { env } from "./env";
 import User from "../models/User.model";
 import logger from "../utils/logger";
+import { resolveSsoRole } from "../utils/roleHierarchy";
 
 // Determine user role based on email
 const determineUserRole = (
@@ -91,8 +92,8 @@ export const configurePassport = (): void => {
               user.microsoftId = microsoftId;
               user.firstName = firstName;
               user.lastName = lastName;
-              // Update role based on current configuration
-              user.role = userRole;
+              // Env lists can raise a role but never overwrite one set in the app
+              user.role = resolveSsoRole(user.role, userRole);
               await user.save();
               logger.info(
                 `Linked Microsoft account for ${email} with role: ${userRole}`,
@@ -112,21 +113,21 @@ export const configurePassport = (): void => {
               );
             }
           } else {
-            // Update role on each login (allows dynamic role changes via env)
+            // Env lists can raise a role but never lower one an admin set in the app
             const previousRole = user.role;
-            user.role = userRole;
+            user.role = resolveSsoRole(user.role, userRole);
             user.lastLogin = new Date();
             await user.save();
 
-            if (previousRole !== userRole) {
+            if (previousRole !== user.role) {
               logger.info(
-                `Updated role for ${email}: ${previousRole} → ${userRole}`,
+                `Updated role for ${email}: ${previousRole} → ${user.role}`,
               );
             }
           }
 
           logger.info(
-            `User authenticated via SSO: ${email} with role: ${userRole}`,
+            `User authenticated via SSO: ${email} with role: ${user.role}`,
           );
           return done(null, user);
         } catch (error) {
