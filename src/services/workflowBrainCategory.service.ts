@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { z } from "zod";
 import {
   BrainMemory,
   WorkflowBrainCategory,
@@ -99,14 +100,56 @@ export const getCategoryById = async (categoryId: string) => {
   return WorkflowBrainCategory.findOne({ _id: categoryId, isActive: true });
 };
 
+const categorySettingsSchema = z
+  .object({
+    accessRole: z.enum(["viewer", "editor", "admin"]),
+    groundingMode: z.enum(["strict", "standard"]),
+    minEvidenceCount: z.number().int().min(1).max(10),
+  })
+  .partial()
+  .strict();
+
+export type CategorySettings = z.infer<typeof categorySettingsSchema>;
+
+export const parseSettings = (input: Record<string, unknown>): CategorySettings => {
+  const picked: Record<string, unknown> = {};
+  for (const key of ["accessRole", "groundingMode", "minEvidenceCount"]) {
+    if (input[key] !== undefined) picked[key] = input[key];
+  }
+  const result = categorySettingsSchema.safeParse(picked);
+  if (!result.success) {
+    // statusCode 400 is mapped by handleError in workflowBrain.controller.ts
+    throw Object.assign(
+      new Error(`Invalid category settings: ${result.error.issues.map((i) => i.path.join(".")).join(", ")}`),
+      { statusCode: 400 },
+    );
+  }
+  return result.data;
+};
+
+/** New categories default to strict grounding unless the caller explicitly provided a mode. */
+export const resolveNewCategorySettings = (input: Record<string, unknown>): CategorySettings => {
+  const settings = parseSettings(input);
+  return { ...settings, groundingMode: settings.groundingMode ?? "strict" };
+};
+
 export const createCategory = async (
-  data: { name: string; description?: string; domain?: WorkflowBrainDomain },
+  data: {
+    name: string;
+    description?: string;
+    domain?: WorkflowBrainDomain;
+    accessRole?: string;
+    groundingMode?: string;
+    minEvidenceCount?: number;
+  },
   userId: string,
 ) => {
+  const settings = resolveNewCategorySettings(data);
   return WorkflowBrainCategory.create({
     name: data.name,
     description: data.description || "",
     domain: data.domain || "general",
+    ...settings,
     createdBy: userId,
     updatedBy: userId,
   });
@@ -114,13 +157,27 @@ export const createCategory = async (
 
 export const updateCategory = async (
   categoryId: string,
-  data: Partial<{ name: string; description: string; domain: WorkflowBrainDomain; isActive: boolean }>,
+  data: Partial<{
+    name: string;
+    description: string;
+    domain: WorkflowBrainDomain;
+    isActive: boolean;
+    accessRole: string;
+    groundingMode: string;
+    minEvidenceCount: number;
+  }>,
   userId: string,
 ) => {
   if (!mongoose.Types.ObjectId.isValid(categoryId)) return null;
+  const settings = parseSettings(data);
+  // Whitelist: never spread the raw request body into the model.
+  const fields: Record<string, unknown> = {};
+  for (const key of ["name", "description", "domain", "isActive"] as const) {
+    if (data[key] !== undefined) fields[key] = data[key];
+  }
   return WorkflowBrainCategory.findByIdAndUpdate(
     categoryId,
-    { ...data, updatedBy: userId },
+    { ...fields, ...settings, updatedBy: userId },
     { new: true, runValidators: true },
   );
 };

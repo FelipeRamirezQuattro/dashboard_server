@@ -4,7 +4,15 @@ import { appRouterService } from "../services/appRouter.service";
 import { documentSearchService } from "../services/documentSearch.service";
 import { oneDriveService } from "../services/oneDrive.service";
 import { workflowBrainChatService } from "../services/workflowBrainChat.service";
+import { resolveUserPermissions } from "../services/permissions.service";
+import {
+  asKnownRole,
+  BRAIN_CHAT_ACCESS_DENIED_REPLY,
+  BrainAccessError,
+} from "../services/brain/access";
+import { recordBrainAudit } from "../services/brainAudit.service";
 import logger from "../utils/logger";
+import crypto from "crypto";
 
 export const sendMessage = async (req: Request, res: Response) => {
   try {
@@ -16,15 +24,30 @@ export const sendMessage = async (req: Request, res: Response) => {
     }
 
     const userId = req.user?.id || "anonymous";
-    const effectiveSessionId = sessionId || `default-${userId}`;
-
-    logger.info(
-      `Chatbot message from user ${userId}: ${message.substring(0, 50)}...`,
-    );
-
+    const userRole = req.user?.role || "viewer";
     const userEmail = req.user?.email;
+    const effectiveSessionId = sessionId || `default-${userId}`;
+    const requestId =
+      context?.requestId ||
+      req.header("X-Request-ID") ||
+      crypto.randomUUID();
+    const permissions =
+      userId !== "anonymous"
+        ? await resolveUserPermissions(userId, userRole)
+        : { businessUnits: [], departments: [], applications: [] };
+
+    logger.info(`Chatbot message received from user ${userId}`);
+
     const normalizedContext = {
       ...(context || {}),
+      requestId,
+      operationType: context?.operationType || "read",
+      user: {
+        id: userId,
+        email: userEmail,
+        role: userRole,
+      },
+      permissions,
       target:
         context?.target ||
         target ||
@@ -56,18 +79,43 @@ export const sendMessage = async (req: Request, res: Response) => {
         });
       }
 
-      const brainResponse = await workflowBrainChatService.answerQuestion(
-        categoryId,
-        message,
-      );
+      const brainRole = asKnownRole(req.user?.role);
+      let brainResponse;
+      try {
+        if (!brainRole) throw new BrainAccessError();
+        brainResponse = await workflowBrainChatService.answerQuestion(
+          categoryId,
+          message,
+          { id: userId, role: brainRole },
+        );
+      } catch (error) {
+        if (!(error instanceof BrainAccessError)) throw error;
+        await recordBrainAudit({
+          userId,
+          action: "BRAIN_ACCESS_DENIED",
+          target: "brain_chat",
+          metadata: { categoryId },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || undefined,
+        });
+        return res.status(200).json({
+          reply: BRAIN_CHAT_ACCESS_DENIED_REPLY,
+          timestamp: new Date(),
+          confidence: 0.4,
+          sessionId: effectiveSessionId,
+          source: "workflow_brain",
+          routedTo: "workflow_brain",
+        });
+      }
 
       return res.status(200).json({
         reply: brainResponse.answer,
         timestamp: new Date(),
-        confidence: brainResponse.usedAi ? 0.86 : 0.75,
+        confidence: brainResponse.status === "unavailable" ? 0 : brainResponse.insufficient ? 0.4 : brainResponse.usedAi ? 0.86 : 0.75,
         sessionId: effectiveSessionId,
         source: "workflow_brain",
         routedTo: brainResponse.categoryName,
+        ...(brainResponse.citations ? { metadata: { citations: brainResponse.citations } } : {}),
       });
     }
 
@@ -100,6 +148,7 @@ export const sendMessage = async (req: Request, res: Response) => {
         sessionId: effectiveSessionId,
         source: appResponse.success ? "app" : "error",
         routedTo: appName,
+        metadata: appResponse.metadata,
       });
     }
 
@@ -147,6 +196,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       message,
       userId,
       userEmail,
+      userRole: req.user?.role,
       sessionId: effectiveSessionId,
       target,
       workflowBrainCategoryId,
@@ -161,6 +211,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       source: response.source,
       routedTo: response.routedTo,
       documents: response.documents,
+      metadata: response.metadata,
     });
   } catch (error) {
     logger.error("Error in chatbot controller:", error);

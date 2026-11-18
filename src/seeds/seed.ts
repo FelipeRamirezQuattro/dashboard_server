@@ -59,6 +59,19 @@ const seedData = async (): Promise<void> => {
         createdBy: adminUser._id,
       },
       {
+        name: "Internal AI Assistant",
+        description:
+          "Dashboard-integrated assistant for ERP questions, official sales-order PDFs, sales-order file search, and technical proposal drafting.",
+        url: "https://internal-ai.osi-apps.com",
+        chatbotApiUrl: "http://localhost:4100/chatbot/query",
+        iconUrl: "https://via.placeholder.com/64/2563EB/FFFFFF?text=AI",
+        category: "other",
+        requiredRole: "viewer",
+        isActive: true,
+        comingSoon: false,
+        createdBy: adminUser._id,
+      },
+      {
         name: "Pump Tracker (OSI Pump Pro)",
         description:
           "A comprehensive pump management system for oil and gas operations. Features include multi-role user management, client organization management, pulling reports with component tracking (barrel, plunger, valves, accessories), automated PDF generation, data visualization (sand sieve, radar & solids charts), AWS S3 file management, and full Swagger/OpenAPI docs at /api.",

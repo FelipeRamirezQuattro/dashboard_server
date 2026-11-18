@@ -4,6 +4,7 @@ import {
   BrainEntity,
   BrainInsight,
   BrainMemory,
+  NON_CHUNK_MEMORY_FILTER,
   BrainUnknownArea,
   BrainWorkflowEdge,
   BrainWorkflowStep,
@@ -48,7 +49,7 @@ export const updateMemory = async (
   } else if (data.summary !== undefined) {
     update.summary = data.summary;
   }
-  return BrainMemory.findByIdAndUpdate(memoryId, update, {
+  return BrainMemory.findOneAndUpdate({ _id: memoryId, ...NON_CHUNK_MEMORY_FILTER }, update, {
     new: true,
     runValidators: true,
   });
@@ -56,7 +57,7 @@ export const updateMemory = async (
 
 export const deleteMemory = async (memoryId: string) => {
   if (!mongoose.Types.ObjectId.isValid(memoryId)) return null;
-  return BrainMemory.findByIdAndDelete(memoryId);
+  return BrainMemory.findOneAndDelete({ _id: memoryId, ...NON_CHUNK_MEMORY_FILTER });
 };
 
 const addSource = (existing: mongoose.Types.ObjectId[], memoryId: mongoose.Types.ObjectId) => {
@@ -285,7 +286,12 @@ export const updateWorkflowStep = async (
   data: Partial<{ name: string; description: string; position: number; status: string }>,
 ) => {
   if (!mongoose.Types.ObjectId.isValid(stepId)) return null;
-  return BrainWorkflowStep.findByIdAndUpdate(stepId, data, {
+  // Whitelist: never let a body move a step to another category (categoryId) or touch other fields.
+  const update: Record<string, unknown> = {};
+  for (const key of ["name", "description", "position", "status"] as const) {
+    if (data[key] !== undefined) update[key] = data[key];
+  }
+  return BrainWorkflowStep.findByIdAndUpdate(stepId, update, {
     new: true,
     runValidators: true,
   });

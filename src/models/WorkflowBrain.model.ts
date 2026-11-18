@@ -16,9 +16,15 @@ export type BrainMemoryType =
   | "memory_fact"
   | "analyzed_note"
   | "design_request"
-  | "system_event";
+  | "system_event"
+  | "document_chunk";
 
-export type BrainMemorySource = "memory" | "workflow" | "design" | "system";
+export type BrainMemorySource = "memory" | "workflow" | "design" | "system" | "document";
+/** Filter fragment for memory listing / edit / delete: document chunks are never UI/chat memories. */
+export const NON_CHUNK_MEMORY_FILTER = { type: { $ne: "document_chunk" } } as const;
+
+export type BrainAccessRole = "viewer" | "editor" | "admin";
+export type BrainGroundingMode = "strict" | "standard";
 export type BrainSeverity = "low" | "medium" | "high";
 
 const objectId = Schema.Types.ObjectId;
@@ -28,6 +34,9 @@ export interface IWorkflowBrainCategory extends Document {
   description: string;
   domain: WorkflowBrainDomain;
   isActive: boolean;
+  accessRole: BrainAccessRole;
+  groundingMode: BrainGroundingMode;
+  minEvidenceCount: number;
   createdBy: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -56,6 +65,10 @@ const categorySchema = new Schema<IWorkflowBrainCategory>(
       index: true,
     },
     isActive: { type: Boolean, default: true, index: true },
+    accessRole: { type: String, enum: ["viewer", "editor", "admin"], default: "viewer" },
+    // Schema default stays "standard" so existing documents are unchanged; createCategory sets "strict".
+    groundingMode: { type: String, enum: ["strict", "standard"], default: "standard" },
+    minEvidenceCount: { type: Number, default: 2, min: 1, max: 10, validate: Number.isInteger },
     createdBy: { type: objectId, ref: "User", required: true },
     updatedBy: { type: objectId, ref: "User" },
   },
@@ -71,6 +84,15 @@ export interface IBrainMemory extends Document {
   type: BrainMemoryType;
   source: BrainMemorySource;
   confidence: number;
+  documentId?: mongoose.Types.ObjectId;
+  documentVersion?: string;
+  heading?: string;
+  chunkIndex?: number;
+  page?: number;
+  embedding?: number[];
+  embeddingModel?: string;
+  embeddingVersion?: string;
+  embeddedAt?: Date;
   createdBy: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -84,17 +106,26 @@ const memorySchema = new Schema<IBrainMemory>(
     summary: { type: String, default: "", trim: true, maxlength: 1200 },
     type: {
       type: String,
-      enum: ["memory_fact", "analyzed_note", "design_request", "system_event"],
+      enum: ["memory_fact", "analyzed_note", "design_request", "system_event", "document_chunk"],
       required: true,
       index: true,
     },
     source: {
       type: String,
-      enum: ["memory", "workflow", "design", "system"],
+      enum: ["memory", "workflow", "design", "system", "document"],
       required: true,
       index: true,
     },
     confidence: { type: Number, default: 1, min: 0, max: 1 },
+    documentId: { type: objectId, ref: "BrainDocument" },
+    documentVersion: { type: String },
+    heading: { type: String },
+    chunkIndex: { type: Number },
+    page: { type: Number },
+    embedding: { type: [Number], select: false },
+    embeddingModel: { type: String },
+    embeddingVersion: { type: String },
+    embeddedAt: { type: Date },
     createdBy: { type: objectId, ref: "User", required: true },
     updatedBy: { type: objectId, ref: "User" },
   },
@@ -102,6 +133,7 @@ const memorySchema = new Schema<IBrainMemory>(
 );
 
 memorySchema.index({ categoryId: 1, createdAt: -1 });
+memorySchema.index({ categoryId: 1, documentId: 1, chunkIndex: 1 });
 
 export interface IBrainEntity extends Document {
   categoryId: mongoose.Types.ObjectId;

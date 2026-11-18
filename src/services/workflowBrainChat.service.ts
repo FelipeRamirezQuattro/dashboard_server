@@ -2,6 +2,18 @@ import OpenAI from "openai";
 import { env } from "../config/env";
 import { requireCategoryState } from "./workflowBrainState.service";
 import logger from "../utils/logger";
+import { normalize, tokensFor } from "./brain/text";
+import {
+  BrainAccessError,
+  effectiveAccessRole,
+  effectiveGroundingMode,
+  effectiveMinEvidenceCount,
+  roleMeets,
+} from "./brain/access";
+import { answerGrounded } from "./brain/groundedAnswer.service";
+import type { GroundedStatus } from "./brain/groundedAnswer.service";
+import type { Citation } from "./brain/types";
+import type { UserRole } from "../models/User.model";
 
 const summarizeItems = (items: unknown[], limit: number): unknown[] =>
   items.slice(0, limit).map((item) => {
@@ -16,46 +28,6 @@ const summarizeItems = (items: unknown[], limit: number): unknown[] =>
       status: object.status,
     };
   });
-
-const stopWords = new Set([
-  "a",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "by",
-  "for",
-  "from",
-  "how",
-  "is",
-  "it",
-  "of",
-  "on",
-  "or",
-  "the",
-  "to",
-  "what",
-  "when",
-  "where",
-  "who",
-  "whos",
-  "whose",
-  "why",
-]);
-
-const normalize = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-const tokensFor = (value: string) =>
-  normalize(value)
-    .split(/\s+/)
-    .filter((token) => token.length > 2 && !stopWords.has(token));
 
 const memoryContent = (memory: unknown) => {
   if (!memory || typeof memory !== "object") return "";
@@ -92,10 +64,7 @@ const answerDirectMemoryQuestion = (
 
   const best = candidates[0];
   logger.info(
-    `[WorkflowBrainDebug][brain:direct-memory] questionTokens=${JSON.stringify([...questionTokens])} candidates=${JSON.stringify(candidates.slice(0, 5).map((candidate) => ({
-      cleaned: candidate.cleaned.slice(0, 160),
-      overlap: candidate.overlap,
-    })))}`,
+    `[WorkflowBrainDebug][brain:direct-memory] candidates=${candidates.length} bestOverlap=${best?.overlap ?? 0}`,
   );
   if (!best || best.overlap < 2) return null;
 
@@ -151,6 +120,10 @@ const answerFromMemory = (
     .join("\n");
 };
 
+/** Strict categories answer only from cited stored evidence; legacy/missing settings mean standard. */
+export const shouldUseGrounding = (category: { groundingMode?: string | null }): boolean =>
+  effectiveGroundingMode(category) === "strict";
+
 class WorkflowBrainChatService {
   private openai?: OpenAI;
 
@@ -163,12 +136,47 @@ class WorkflowBrainChatService {
   async answerQuestion(
     categoryId: string,
     question: string,
-  ): Promise<{ answer: string; categoryName: string; usedAi: boolean }> {
+    user: { id: string; role: UserRole },
+  ): Promise<{
+    answer: string;
+    categoryName: string;
+    usedAi: boolean;
+    citations?: Citation[];
+    insufficient?: boolean;
+    /** Strict categories only: "unavailable" means the answer service failed (not missing data). */
+    status?: GroundedStatus;
+  }> {
     const state = await requireCategoryState(categoryId);
-    const category = state.category as { name?: string; description?: string };
+    const category = state.category as {
+      name?: string;
+      description?: string;
+      accessRole?: string | null;
+      groundingMode?: string | null;
+      minEvidenceCount?: number | null;
+    };
+    // Legacy categories (no accessRole) are viewer-level; unknown values fail closed to admin.
+    if (!roleMeets(user.role, effectiveAccessRole(category))) {
+      throw new BrainAccessError();
+    }
     const categoryName = category.name || "Selected Workflow Brain category";
+    if (shouldUseGrounding(category)) {
+      // strict: grounded path only (no memory/fallback answers); logs carry ids and counts only
+      const grounded = await answerGrounded({
+        category: { _id: categoryId, name: categoryName, minEvidenceCount: effectiveMinEvidenceCount(category) },
+        question,
+        userId: user.id,
+      });
+      return {
+        answer: grounded.reply,
+        categoryName,
+        usedAi: true,
+        citations: grounded.citations,
+        insufficient: grounded.insufficient,
+        status: grounded.status,
+      };
+    }
     logger.info(
-      `[WorkflowBrainDebug][brain:start] categoryId=${categoryId} categoryName="${categoryName}" memoryCount=${state.memories.length} workflowStepCount=${state.workflowSteps.length} question="${question.slice(0, 160)}"`,
+      `[WorkflowBrainDebug][brain:start] categoryId=${categoryId} categoryName="${categoryName}" memoryCount=${state.memories.length} workflowStepCount=${state.workflowSteps.length}`,
     );
     const directMemoryAnswer = answerDirectMemoryQuestion(
       question,
@@ -178,7 +186,7 @@ class WorkflowBrainChatService {
 
     if (directMemoryAnswer) {
       logger.info(
-        `[WorkflowBrainDebug][brain:answer] mode=direct-memory categoryName="${categoryName}" answer="${directMemoryAnswer.slice(0, 220)}"`,
+        `[WorkflowBrainDebug][brain:answer] mode=direct-memory categoryName="${categoryName}"`,
       );
       return {
         answer: directMemoryAnswer,
@@ -235,7 +243,7 @@ class WorkflowBrainChatService {
       completion.choices[0]?.message?.content?.trim() ||
       "I could not generate a Workflow Brain answer for that category.";
     logger.info(
-      `[WorkflowBrainDebug][brain:answer] mode=openai categoryName="${categoryName}" answer="${aiAnswer.slice(0, 220)}"`,
+      `[WorkflowBrainDebug][brain:answer] mode=openai categoryName="${categoryName}"`,
     );
 
     return {

@@ -11,6 +11,7 @@ import { extractTextFromBuffer } from "../services/documentText.service";
 import { oneDriveService } from "../services/oneDrive.service";
 import { s3FileStorageService } from "../services/s3FileStorage.service";
 import logger from "../utils/logger";
+import { fileBankVisibilityFilter, fixMulterFilename } from "../services/brain/fileBankAccess";
 
 const router = Router();
 
@@ -52,15 +53,16 @@ router.post(
             .filter(Boolean)
         : [];
 
+      const originalName = fixMulterFilename(req.file.originalname);
       const fileId = new mongoose.Types.ObjectId();
-      const ext = path.extname(req.file.originalname);
+      const ext = path.extname(originalName);
       const storedName = `${crypto.randomUUID()}${ext}`;
       const s3Key = `file-bank/${storedName}`;
       const downloadUrl = `/file-bank/${fileId}/download`;
       const contentText = await extractTextFromBuffer(
         req.file.buffer,
         req.file.mimetype,
-        req.file.originalname,
+        originalName,
       );
 
       await s3FileStorageService.uploadObject(
@@ -71,7 +73,7 @@ router.post(
 
       const fileBank = new FileBank({
         _id: fileId,
-        originalName: req.file.originalname,
+        originalName,
         storedName,
         mimeType: req.file.mimetype,
         sizeBytes: req.file.size,
@@ -91,7 +93,7 @@ router.post(
       await fileBank.save();
 
       logger.info(
-        `File uploaded: ${req.file.originalname} by ${req.user?.email}`,
+        `File uploaded: ${originalName} by ${req.user?.email}`,
       );
 
       res.status(201).json({ file: fileBank.toJSON() });
@@ -106,9 +108,9 @@ router.post(
 router.get(
   "/",
   authenticate,
-  async (_req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
-      const files = await FileBank.find().sort({ uploadedAt: -1 });
+      const files = await FileBank.find(fileBankVisibilityFilter(req.user?.role)).sort({ uploadedAt: -1 });
       res.json({ files });
     } catch (error) {
       logger.error("Error fetching file bank:", error);
@@ -160,7 +162,10 @@ router.get(
         res.status(400).json({ error: "Invalid file ID" });
         return;
       }
-      const fileRecord = await FileBank.findById(req.params.id);
+      const fileRecord = await FileBank.findOne({
+        _id: req.params.id,
+        ...fileBankVisibilityFilter(req.user?.role),
+      });
       if (!fileRecord) {
         res.status(404).json({ error: "File not found" });
         return;

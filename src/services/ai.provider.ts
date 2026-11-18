@@ -132,7 +132,7 @@ export class AIChatProvider implements ChatProvider {
     }
 
     try {
-      logger.info(`AI processing message: ${message.substring(0, 50)}...`);
+      logger.info("AI processing message");
 
       const completion = await this.client.chat.completions.create({
         model: env.openaiModel || "gpt-4o-mini", // Use mini for cost savings

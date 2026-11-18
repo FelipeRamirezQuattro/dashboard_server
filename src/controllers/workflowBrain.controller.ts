@@ -2,6 +2,15 @@ import { Request, Response } from "express";
 import * as categoryService from "../services/workflowBrainCategory.service";
 import * as analysisService from "../services/workflowBrainAnalysis.service";
 import { getCategoryState } from "../services/workflowBrainState.service";
+import { canChangeCategorySettings, categoryUpdateNeedsAdmin } from "../services/brain/access";
+import { filterReadableCategories } from "../services/brain/categoryAccess";
+
+const SETTINGS_KEYS = ["accessRole", "groundingMode", "minEvidenceCount"] as const;
+const bodyHasSettings = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  SETTINGS_KEYS.some((key) => (body as Record<string, unknown>)[key] !== undefined);
+const FORBIDDEN_SETTINGS = { error: "Insufficient permissions to change category settings" };
 
 const userId = (req: Request) => req.user!._id.toString();
 
@@ -18,9 +27,10 @@ const handleError = (res: Response, error: unknown, fallback: string) => {
   });
 };
 
-export const getCategories = async (_req: Request, res: Response) => {
+export const getCategories = async (req: Request, res: Response) => {
   try {
-    res.json(await categoryService.getCategories());
+    const categories = await categoryService.getCategories();
+    res.json(filterReadableCategories(req.user!.role, categories));
   } catch (error) {
     handleError(res, error, "Failed to fetch workflow brain categories");
   }
@@ -28,6 +38,10 @@ export const getCategories = async (_req: Request, res: Response) => {
 
 export const createCategory = async (req: Request, res: Response) => {
   try {
+    if (bodyHasSettings(req.body) && !canChangeCategorySettings(req.user!.role)) {
+      res.status(403).json(FORBIDDEN_SETTINGS);
+      return;
+    }
     if (!req.body.name?.trim()) {
       res.status(400).json({ error: "Category name is required" });
       return;
@@ -54,6 +68,11 @@ export const getCategoryById = async (req: Request, res: Response) => {
 
 export const updateCategory = async (req: Request, res: Response) => {
   try {
+    // settings and isActive (soft delete) are admin-only; editors may still edit name/description/domain
+    if (categoryUpdateNeedsAdmin(req.body) && !canChangeCategorySettings(req.user!.role)) {
+      res.status(403).json(FORBIDDEN_SETTINGS);
+      return;
+    }
     const category = await categoryService.updateCategory(
       req.params.categoryId,
       req.body,
