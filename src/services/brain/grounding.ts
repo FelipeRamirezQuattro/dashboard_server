@@ -341,9 +341,9 @@ const evidenceForNumbers = (evText: string, preparedStatement: string): string =
  * word of the cited evidence, so its digits are not a numeric claim. A word touching a decimal/grouping mark next to a
  * digit ("v2.5", "1,v2") is left in place so the number around it is still read whole and checked.
  */
-const withoutVerifiedIdentifiers = (t: string): string =>
+const withoutVerifiedIdentifiers = (t: string, evidenceWords: Set<string>): string =>
   t.replace(WORD_RE, (w, offset: number) => {
-    if (!/^\p{L}/u.test(w) || !/\d/.test(w)) return w;
+    if (!/^\p{L}/u.test(w) || !/\d/.test(w) || !evidenceWords.has(w.toLowerCase())) return w;
     const before = t.slice(Math.max(0, offset - 2), offset);
     const after = t.slice(offset + w.length, offset + w.length + 2);
     return /[0-9][.,]$/.test(before) || /^[.,][0-9]/.test(after) ? w : " ";
@@ -387,7 +387,7 @@ const numberGateFails = (
     w.length >= 3 && evidenceLetterWords.has(w.toLowerCase()) && !isMagnitudeLike(w) ? MASK : w
   );
   if (identifierMissing || suffixViolation(masked)) return true;
-  return numberTokens(withoutVerifiedIdentifiers(t)).some((n) => !evidenceNumbers.has(n));
+  return numberTokens(withoutVerifiedIdentifiers(t, evidenceWords)).some((n) => !evidenceNumbers.has(n));
 };
 export const DRAFT_LINE = "DRAFT — suggestions only; an engineer must review.";
 
