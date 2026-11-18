@@ -1,5 +1,6 @@
 import { BrainAccessError, asKnownRole, effectiveAccessRole, roleMeets } from "./access";
 import type { Citation } from "./types";
+import type { GroundedStatus } from "./groundedAnswer.service";
 import type { UserRole } from "../../models/User.model";
 import logger from "../../utils/logger";
 
@@ -15,12 +16,20 @@ export interface RodPumpCategory {
 
 export type RodPumpRoute = "brain" | "fallback_pump_pro";
 
-/** Pure: brain only for an existing, active category the (known) role may read; everything else keeps the Pump Pro path. */
+/** The category lookup: by name AND active (name is not unique; a soft-deleted namesake must never be picked). */
+export const rodPumpCategoryFilter = (name: string): { name: string; isActive: true } => ({ name, isActive: true });
+
+/**
+ * Pure: brain only for an existing, ACTIVE category whose effective accessRole is exactly "admin" (the bootstrap's
+ * setting) and a (known) role that may read it. A same-named category an editor created (viewer/editor-readable,
+ * legacy without accessRole) or one with drifted settings never receives the auto-route: Pump Pro path instead.
+ */
 export const decideRodPumpRoute = (category: RodPumpCategory | null, role: string | undefined): RodPumpRoute => {
-  if (!category || category.isActive === false) return "fallback_pump_pro";
+  if (!category || category.isActive !== true) return "fallback_pump_pro";
+  if (effectiveAccessRole(category) !== "admin") return "fallback_pump_pro";
   const known = asKnownRole(role);
   if (!known) return "fallback_pump_pro";
-  return roleMeets(known, effectiveAccessRole(category)) ? "brain" : "fallback_pump_pro";
+  return roleMeets(known, "admin") ? "brain" : "fallback_pump_pro";
 };
 
 export interface TtlCache<T> {
@@ -40,7 +49,7 @@ export const createTtlCache = <T>(ttlMs: number, now: () => number = Date.now): 
 };
 
 export type RodPumpAnswer =
-  | { route: "brain"; reply: string; citations?: Citation[]; insufficient: boolean; categoryName: string }
+  | { route: "brain"; reply: string; citations?: Citation[]; insufficient: boolean; status?: GroundedStatus; categoryName: string }
   | { route: "fallback_pump_pro" };
 
 export interface RodPumpPorts {
@@ -49,7 +58,7 @@ export interface RodPumpPorts {
     categoryId: string,
     message: string,
     user: { id: string; role: UserRole },
-  ): Promise<{ answer: string; categoryName: string; citations?: Citation[]; insufficient?: boolean }>;
+  ): Promise<{ answer: string; categoryName: string; citations?: Citation[]; insufficient?: boolean; status?: GroundedStatus }>;
 }
 
 const categoryCache = createTtlCache<RodPumpCategory | null>(CATEGORY_CACHE_TTL_MS);
@@ -62,7 +71,7 @@ const defaultPorts = (): RodPumpPorts => {
       const cached = categoryCache.get();
       if (cached !== undefined) return cached;
       const { WorkflowBrainCategory } = require("../../models/WorkflowBrain.model");
-      const doc = await WorkflowBrainCategory.findOne({ name }).select("_id accessRole isActive name").lean();
+      const doc = await WorkflowBrainCategory.findOne(rodPumpCategoryFilter(name)).select("_id accessRole isActive name").lean();
       const value: RodPumpCategory | null = doc
         ? { _id: doc._id, accessRole: doc.accessRole, isActive: doc.isActive, name: doc.name }
         : null;
@@ -94,6 +103,7 @@ export const answerRodPumpQuestion = async (
       reply: result.answer,
       citations: result.citations,
       insufficient: Boolean(result.insufficient),
+      status: result.status,
       categoryName: result.categoryName || ROD_PUMP_CATEGORY_NAME,
     };
   } catch (error) {
