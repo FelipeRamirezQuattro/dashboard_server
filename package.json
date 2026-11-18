@@ -14,6 +14,8 @@
     "lint": "eslint src --ext .ts",
     "test:brain": "NODE_ENV=test ts-node src/tests/brain/run.ts",
     "brain:rodpump": "ts-node src/scripts/registerRodPumpBrain.ts",
+    "brain:rodpump-seed": "ts-node src/scripts/seedRodPumpDemo.ts",
+    "brain:rodpump-unseed": "ts-node src/scripts/unseedRodPumpDemo.ts",
     "brain:grounding-live": "ts-node src/scripts/groundingLiveCheck.ts",
     "brain:grounding-dry": "ts-node src/scripts/groundingLiveCheck.ts --dry"
   },

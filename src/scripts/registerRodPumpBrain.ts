@@ -101,7 +101,7 @@ export const runBootstrap = async (ports: BootstrapPorts): Promise<BootstrapResu
   return { categoryId, status: plan.action === "create" ? "created" : "already present", drift: plan.drift };
 };
 
-const mongoPorts = (): BootstrapPorts => ({
+export const mongoPorts = (): BootstrapPorts => ({
   findActiveCategories: async (filter) => {
     const docs = await WorkflowBrainCategory.find(filter).limit(2).lean();
     return docs.map((doc) => ({
