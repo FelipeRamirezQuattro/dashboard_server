@@ -92,7 +92,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       return res.status(200).json({
         reply: brainResponse.answer,
         timestamp: new Date(),
-        confidence: brainResponse.insufficient ? 0.4 : brainResponse.usedAi ? 0.86 : 0.75,
+        confidence: brainResponse.status === "unavailable" ? 0 : brainResponse.insufficient ? 0.4 : brainResponse.usedAi ? 0.86 : 0.75,
         sessionId: effectiveSessionId,
         source: "workflow_brain",
         routedTo: brainResponse.categoryName,

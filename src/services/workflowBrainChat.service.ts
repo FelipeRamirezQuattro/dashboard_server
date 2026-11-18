@@ -11,6 +11,7 @@ import {
   roleMeets,
 } from "./brain/access";
 import { answerGrounded } from "./brain/groundedAnswer.service";
+import type { GroundedStatus } from "./brain/groundedAnswer.service";
 import type { Citation } from "./brain/types";
 import type { UserRole } from "../models/User.model";
 
@@ -142,6 +143,8 @@ class WorkflowBrainChatService {
     usedAi: boolean;
     citations?: Citation[];
     insufficient?: boolean;
+    /** Strict categories only: "unavailable" means the answer service failed (not missing data). */
+    status?: GroundedStatus;
   }> {
     const state = await requireCategoryState(categoryId);
     const category = state.category as {
@@ -169,6 +172,7 @@ class WorkflowBrainChatService {
         usedAi: true,
         citations: grounded.citations,
         insufficient: grounded.insufficient,
+        status: grounded.status,
       };
     }
     logger.info(

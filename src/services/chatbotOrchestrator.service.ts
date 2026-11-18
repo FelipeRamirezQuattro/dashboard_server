@@ -259,7 +259,7 @@ class ChatbotOrchestrator {
       return {
         reply: result.answer,
         timestamp: new Date(),
-        confidence: result.insufficient ? 0.4 : result.usedAi ? 0.86 : 0.65,
+        confidence: result.status === "unavailable" ? 0 : result.insufficient ? 0.4 : result.usedAi ? 0.86 : 0.65,
         source: "workflow_brain",
         routedTo: result.categoryName,
         ...(result.citations ? { metadata: { citations: result.citations } } : {}),
