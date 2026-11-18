@@ -70,8 +70,9 @@ export interface StoredFlag {
 /**
  * Flag key format (what the UI echoes back in `acknowledgeFlags`): `flagKey(flag)` = `${flag.id}:${flag.line}`.
  * Markdown flags: id = pattern id (e.g. "ignore_previous"), line = 1-based line in the RAW file.
- * PDF flags: id = `${patternId}:p${page}`, line = 1-based line within that page's raw text,
- * so the key is e.g. "ignore_previous:p3:5" and stays unique across pages.
+ * PDF flags: id = `${patternId}:p${page}`, line = 1-based sentence/line segment within that page's raw text (a PDF
+ * page is usually one long line), so the key is e.g. "ignore_previous:p3:5": unique across pages and across distinct
+ * injections on one page; the excerpt is centered on the match.
  */
 export const flagKeyOf = (flag: { id: string; line: number }): string =>
   flagKey(flag);
@@ -85,10 +86,10 @@ export const buildUploadFlags = (rawText: string): StoredFlag[] =>
     acknowledged: false,
   }));
 
-/** Scan RAW extracted text per page; lines are numbered per page. */
+/** Scan RAW extracted text per page; sentence/line segments are numbered per page. */
 export const buildPdfUploadFlags = (pages: PdfPage[]): StoredFlag[] =>
   pages.flatMap((p) =>
-    scanForInjection(p.text).map((f) => ({
+    scanForInjection(p.text, "sentence").map((f) => ({
       id: `${f.id}:p${p.page}`,
       line: f.line,
       excerpt: f.excerpt.slice(0, 80),
