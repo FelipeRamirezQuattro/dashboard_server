@@ -156,12 +156,13 @@ const main = async (): Promise<void> => {
   const leaky: typeof import("../../services/brain/groundedAnswer.service").answerGroundedWith = async (ports, p) => {
     const r = await ports.retrieve({ categoryId: String(p.category._id) }, p.question);
     const first = r.evidence[0];
-    if (!first) return { reply: "Not enough stored information to answer this.\nSearched: 0 stored records.\nAdding more historical data for this topic would help.", citations: [], insufficient: true, usedCount: 0 };
+    if (!first) return { reply: "Not enough stored information to answer this.\nSearched: 0 stored records.\nAdding more historical data for this topic would help.", citations: [], insufficient: true, usedCount: 0, status: "insufficient" };
     return {
       reply: "- DEMO-002 ran 999 days. [1]\n\nBased on 1 stored records.",
       citations: [{ id: first.id, label: first.label }],
       insufficient: false,
       usedCount: 1,
+      status: "answered",
     };
   };
   const leakyReport = await run(dryModel, { answer: leaky }, [byId("ans-runlife-002")!]);
@@ -173,6 +174,7 @@ const main = async (): Promise<void> => {
     citations: [{ id: "ds:rod_pump_failure/cases/DEMO-777", label: "x" }],
     insufficient: false,
     usedCount: 1,
+    status: "answered",
   });
   const ghostReport = await run(dryModel, { answer: ghost }, [byId("ans-runlife-002")!]);
   ok("unknown cited id fails the case", !ghostReport.ok && ghostReport.verdicts[0].failures.some((f) => f.includes("not in retrieved evidence")));
@@ -182,14 +184,14 @@ const main = async (): Promise<void> => {
     await ports.callModel({ system: "s", user: "u" });
     const r = await ports.retrieve({ categoryId: String(p.category._id) }, p.question);
     void r;
-    return { reply: "Not enough stored information to answer this.\nSearched: 1 stored records.\nAdding more historical data for this topic would help.", citations: [], insufficient: true, usedCount: 0 };
+    return { reply: "Not enough stored information to answer this.\nSearched: 1 stored records.\nAdding more historical data for this topic would help.", citations: [], insufficient: true, usedCount: 0, status: "insufficient" };
   };
   const eagerReport = await run(dryModel, { answer: eager }, [minCase!]);
   ok("model called below min evidence fails", !eagerReport.ok && eagerReport.verdicts[0].failures.some((f) => f.includes("model called")));
 
   // ---- evaluateCase: grammar / forbidden / missing items
   const ev: Evidence[] = [{ id: "ds:x/t/1", kind: "row", text: "t: days_run=388; pull=2025-12-17", label: "t 1", score: 0, isGuidance: false }];
-  const mk = (reply: string, insufficient = false): GroundedResult => ({ reply, citations: insufficient ? [] : [{ id: "ds:x/t/1", label: "t 1" }], insufficient, usedCount: insufficient ? 0 : 1 });
+  const mk = (reply: string, insufficient = false): GroundedResult => ({ reply, citations: insufficient ? [] : [{ id: "ds:x/t/1", label: "t 1" }], insufficient, usedCount: insufficient ? 0 : 1, status: insufficient ? "insufficient" : "answered" });
   const base: GroundingCase = { id: "t", question: "q", answerable: true, category: "answerable", mustCite: ["ds:x/t/1"], mustContain: ["388"] };
   expect("evaluateCase: good answer passes", evaluateCase(base, mk("- ran 388 days [1]\n\nBased on 1 stored records."), ev).verdict, "PASS");
   expect("evaluateCase: 2025-12-17 numbers are stored", evaluateCase(base, mk("- 388 on 2025-12-17 [1]\n\nBased on 1 stored records."), ev).verdict, "PASS");
@@ -205,6 +207,30 @@ const main = async (): Promise<void> => {
   expect("evaluateCase: refusal passes a non-answerable case", evaluateCase({ ...base, answerable: false, category: "offtopic", mustCite: undefined, mustContain: undefined }, refusal, ev).verdict, "PASS");
   expect("evaluateCase: refusal fails a plain answerable case", evaluateCase(base, refusal, ev).verdict, "FAIL");
   expect("evaluateCase: refusal accepted when mayRefuse", evaluateCase({ ...base, mayRefuse: true }, refusal, ev).verdict, "PASS");
+
+  // final review I3: "unavailable" (model/provider/retrieval failure) is a FAIL for every case, never a pass
+  const down: GroundedResult = { reply: "The answer service is temporarily unavailable. Please try again in a moment.", citations: [], insufficient: false, usedCount: 0, status: "unavailable" };
+  for (const c of [{ ...base, answerable: false, category: "offtopic" as const, mustCite: undefined, mustContain: undefined }, { ...base, mayRefuse: true }, base]) {
+    const v = evaluateCase(c, down, ev);
+    expect(`evaluateCase: unavailable fails ${c.category}${c.mayRefuse ? " (mayRefuse)" : ""}`, [v.verdict, v.failures.some((f) => f.includes("unavailable"))], ["FAIL", true]);
+  }
+  // final review I2: digits inside ids/dates of the cited row are not stored values (independent harness rule)
+  const ev2: Evidence[] = [{ id: "ds:x/t/1", kind: "row", text: "cases: case_id=DEMO-002; pump_serial=DP-1002; pull_date=2025-12-17; days_run=388; species=scale_caco3", label: "t 1", score: 0, isGuidance: false }];
+  for (const [b, n] of [["DEMO-002 ran 12 days", 1], ["DEMO-002 ran 2025 days", 1], ["ran 1002 days", 1], ["DEMO-002 ran 388 days", 0], ["DEMO-002 was pulled on 2025-12-17", 0],
+    ["pump DP-1002 ran 388 days", 0], ["demo-002 ran 388 days", 0], ["CaCO3 was found", 0], ["CaCO4 was found", 1]] as [string, number][]) {
+    expect(`evaluateCase: id/date digits ${JSON.stringify(b)} => ${n} invented`, evaluateCase({ ...base, mustContain: [] }, mk(`- ${b} [1]\n\nBased on 1 stored records.`), ev2).invalidNumbers, n);
+  }
+  // final review M1: an answer citing ONE record (>= min retrieved) passes the run-days case
+  const oneCite = async (prompt: { system: string; user: string }): Promise<string> =>
+    prompt.user.includes('<evidence id="ds:rod_pump_failure/cases/DEMO-002">')
+      ? JSON.stringify({ statements: [{ text: "DEMO-002 ran 388 days.", citations: ["ds:rod_pump_failure/cases/DEMO-002"] }] })
+      : JSON.stringify({ statements: [] });
+  const oneReport = await run(oneCite, {}, [byId("num-days-002")!]);
+  expect("M1: num-days-002 answered from the case row alone passes", [oneReport.ok, oneReport.verdicts[0].citedCount, oneReport.verdicts[0].evidenceCount >= 2], [true, 1, true]);
+  // final review I3 end-to-end: a provider failure fails every case of the set
+  const failing = async (): Promise<string> => { throw new Error("503"); };
+  const downReport = await run(failing);
+  ok("I3: provider failure => every case that calls the model FAILS", downReport.verdicts.filter((v) => v.modelCalled).every((v) => v.verdict === "FAIL") && downReport.verdicts.some((v) => v.modelCalled));
 
   // retrieval sanity used by the set: DEMO-999 is intentionally absent
   const none = await retrieveEvidence({ categoryId: "x", minScore: 0.3 }, "what is the run life of DEMO-999?", retrieval);

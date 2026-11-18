@@ -339,6 +339,6 @@
     "answerable": false,
     "category": "minEvidence",
     "minEvidenceCount": 2,
-    "note": "only ONE stored row mentions the tagging damage (components DEMO-002-vr-bushing); with min evidence 2 the reply is insufficient and the model is not called"
+    "note": "only ONE stored row mentions the tagging damage (components DEMO-002-vr-bushing): fewer items RETRIEVED than min evidence 2, so the reply is insufficient and the model is not called (A6.4). Once >= 2 items are retrieved, an answer citing one record is valid"
   }
 ]

@@ -1,8 +1,8 @@
 /// <reference types="node" />
 // End-to-end grounded answering over the Rod Pump sample data with FAKE retrieval/model/audit ports.
 // No database, no network, no OpenAI.
-import { answerGroundedWith, withoutSearchClaim } from "../../services/brain/groundedAnswer.service";
-import type { GroundedPorts } from "../../services/brain/groundedAnswer.service";
+import { answerGroundedWith, notConfiguredResult } from "../../services/brain/groundedAnswer.service";
+import type { GroundedAuditMeta, GroundedPorts } from "../../services/brain/groundedAnswer.service";
 import { retrieveEvidence } from "../../services/brain/retrieval";
 import type { ChunkLite, DocumentLite } from "../../services/brain/retrieval";
 import { shouldUseGrounding } from "../../services/workflowBrainChat.service";
@@ -45,7 +45,7 @@ const fakeModel = (reply: string | ((c: Call) => string) | Error) => {
   };
   return { calls, callModel };
 };
-const audits: Record<string, unknown>[] = [];
+const audits: GroundedAuditMeta[] = [];
 const ports = (model: ReturnType<typeof fakeModel>): GroundedPorts => ({
   retrieve: (p, q) => retrieveEvidence(p, q, fakePorts({ records, documents, chunks })),
   callModel: model.callModel,
@@ -66,6 +66,7 @@ const main = async (): Promise<void> => {
   const a = await answerGroundedWith(ports(good), { category: cat(), question: "why did DEMO-001 fail?" });
   expect("(a) model called once", good.calls.length, 1);
   expect("(a) sufficient", a.insufficient, false);
+  expect("(a) status answered", a.status, "answered");
   ok("(a) bullets", a.reply.startsWith("- DEMO-001 ran 210 days"));
   ok("(a) based-on line", a.reply.includes("Based on 4 stored records."));
   expect("(a) citations resolved", a.citations.map((c) => c.id), [C1, W1("plunger_in", 0), W1("plunger_in", 1), K1("tv-ball")]);
@@ -82,23 +83,38 @@ const main = async (): Promise<void> => {
   expect("(b) model not called", notCalled.calls.length, 0);
   ok("(b) insufficient reply", b.reply.startsWith("Not enough stored information to answer this."));
   ok("(b) reply says what was searched", /Searched: [1-9]\d* stored records\./.test(b.reply));
-  expect("(b) audit counts only", audits, [{ categoryId: cat()._id, counts: 0 }]);
+  expect("(b) audit counts only", audits, [{ categoryId: cat()._id, counts: 0, action: "BRAIN_ANSWER_INSUFFICIENT_EVIDENCE" }]);
+  expect("(b) status insufficient", b.status, "insufficient");
 
-  // (c) non-JSON / provider errors => insufficient, never a throw
-  const c = await answerGroundedWith(ports(fakeModel("Sure! DEMO-001 ran 210 days.")), { category: cat(), question: "why did DEMO-001 fail?" });
-  expect("(c) non-JSON => insufficient", c.insufficient, true);
-  const c2 = await answerGroundedWith(ports(fakeModel(new Error("429 rate limited"))), { category: cat(), question: "why did DEMO-001 fail?" });
-  expect("(c) provider error => insufficient", c2.insufficient, true);
-  const c3 = await answerGroundedWith(
-    { ...ports(fakeModel("{}")), retrieve: async () => { throw new Error("db down"); } },
-    { category: cat(), question: "why did DEMO-001 fail?" },
-  );
-  expect("(c) retrieval error => insufficient", c3.insufficient, true);
+  // (c) final review I3: model / provider / retrieval failures are "unavailable", never "not enough stored information"
+  const UNAVAILABLE = "The answer service is temporarily unavailable. Please try again in a moment.";
+  const unavailableCases: [string, GroundedPorts][] = [
+    ["non-JSON model output", ports(fakeModel("Sure! DEMO-001 ran 210 days."))],
+    ["truncated JSON", ports(fakeModel('{"statements":[{"text":"DEMO-001 ran 210'))],
+    ["provider error (429)", ports(fakeModel(new Error("429 rate limited")))],
+    ["timeout", ports(fakeModel(Object.assign(new Error("Request timed out."), { name: "APIConnectionTimeoutError" })))],
+    ["bad key (401)", ports(fakeModel(Object.assign(new Error("401 Incorrect API key"), { name: "AuthenticationError" })))],
+    ["retrieval error", { ...ports(fakeModel("{}")), retrieve: async () => { throw new Error("db down"); } }],
+  ];
+  for (const [name, pp] of unavailableCases) {
+    audits.length = 0;
+    const r = await answerGroundedWith(pp, { category: cat(), question: "why did DEMO-001 fail?" });
+    expect(`(c) ${name} => status unavailable`, r.status, "unavailable");
+    expect(`(c) ${name} => unavailable reply`, r.reply, UNAVAILABLE);
+    ok(`(c) ${name} => not the insufficient reply`, !r.reply.startsWith("Not enough stored information"));
+    expect(`(c) ${name} => not flagged insufficient, no citations`, [r.insufficient, r.citations], [false, []]);
+    ok(`(c) ${name} => no insufficient-evidence audit`, audits.every((x) => x.action !== "BRAIN_ANSWER_INSUFFICIENT_EVIDENCE"));
+    ok(`(c) ${name} => unavailable audit with ids/counts only`, audits.length === 1 && audits[0].action === "BRAIN_ANSWER_UNAVAILABLE"
+      && Object.keys(audits[0]).every((k) => ["categoryId", "counts", "action", "stage"].includes(k)) && typeof audits[0].stage === "string");
+  }
   const auditThrows = await answerGroundedWith(
     { ...ports(fakeModel("nope")), audit: async () => { throw new Error("audit down"); } },
     { category: cat(), question: "why did DEMO-001 fail?" },
   );
-  expect("(c) audit failure never breaks the answer", auditThrows.insufficient, true);
+  expect("(c) audit failure never breaks the answer", auditThrows.status, "unavailable");
+  // valid JSON with zero usable statements is a real "insufficient" (the model worked)
+  const emptyJson = await answerGroundedWith(ports(fakeModel('{"statements":[]}')), { category: cat(), question: "why did DEMO-001 fail?" });
+  expect("(c) valid empty JSON => insufficient", [emptyJson.status, emptyJson.insufficient], ["insufficient", true]);
 
   // (d) unknown id / guidance id / invented number are dropped
   const d = await answerGroundedWith(ports(fakeModel(json([
@@ -117,6 +133,7 @@ const main = async (): Promise<void> => {
     { text: "It was a bad pump.", citations: ["nope"] },
   ]))), { category: cat(), question: "why did DEMO-001 fail?" });
   expect("(d) none remain => insufficient", d2.insufficient, true);
+  expect("(d) none remain => status insufficient", d2.status, "insufficient");
 
   // (e) injection text only inside <evidence> blocks; cannot produce an uncited/unsupported statement
   const inj = fakeModel(json([
@@ -138,13 +155,17 @@ const main = async (): Promise<void> => {
   expect("(e) cited ids only from supported statements", e.citations.map((x) => x.id).sort(), ["doc:d1#0", K1("plunger")].sort());
   ok("(e) supported statements kept", e.reply.includes("0.007 in") && e.reply.includes("found plunger wear"));
 
-  // (f) minEvidenceCount 3 needs >= 3 distinct cited items
+  // (f) contract A6.4 (final review M1): minEvidenceCount applies to RETRIEVED items; once enough were retrieved, an
+  // answer citing fewer items (even one) is valid
   const two = fakeModel(json([
     { text: "DEMO-001 ran 210 days.", citations: [C1] },
     { text: "Plunger wear was 6 mil.", citations: [W1("plunger_in", 0), C1] },
   ]));
   const f1 = await answerGroundedWith(ports(two), { category: cat(3), question: "why did DEMO-001 fail?" });
-  expect("(f) 2 distinct < 3 => insufficient", f1.insufficient, true);
+  expect("(f) 2 cited, >= 3 retrieved, min 3 => answered", [f1.insufficient, f1.usedCount], [false, 2]);
+  const oneCite = fakeModel(json([{ text: "DEMO-002 ran 388 days.", citations: [`${P}cases/DEMO-002`] }]));
+  const f0 = await answerGroundedWith(ports(oneCite), { category: cat(2), question: "how many days did DEMO-002 run?" });
+  expect("(f) 'DEMO-002 ran 388 days' citing only the case row => answered", [f0.insufficient, f0.usedCount, f0.reply.split("\n")[0]], [false, 1, "- DEMO-002 ran 388 days. [1]"]);
   const three = fakeModel(json([
     { text: "DEMO-001 ran 210 days.", citations: [C1] },
     { text: "Plunger wear was 6 mil and 7 mil.", citations: [W1("plunger_in", 0), W1("plunger_in", 1)] },
@@ -215,12 +236,11 @@ const main = async (): Promise<void> => {
     expect(`(overlap) legit ${JSON.stringify(q)} answered from ${id}`, [m.calls.length, r.insufficient, r.citations.map((x) => x.id)], [1, false, [id]]);
   }
 
-  // no OpenAI key: the reply keeps the first sentence and never claims "Searched: 0 stored records"
-  const noKey = withoutSearchClaim(await answerGroundedWith(
-    { retrieve: async () => ({ evidence: [], guidance: [] }), callModel: async () => { throw new Error("no key"); }, audit: async () => undefined },
-    { category: cat(), question: "why did DEMO-001 fail?" },
-  ));
-  ok("(no key) first sentence kept", noKey.reply.startsWith("Not enough stored information to answer this.\n"));
+  // no OpenAI key: an explicit "not configured" reply, status unavailable; never "Not enough stored information" and
+  // never a "Searched: 0 stored records" claim
+  const noKey = notConfiguredResult();
+  expect("(no key) status unavailable", [noKey.status, noKey.insufficient, noKey.citations], ["unavailable", false, []]);
+  ok("(no key) not the insufficient reply", !noKey.reply.startsWith("Not enough stored information"));
   ok("(no key) no Searched claim", !/Searched:/.test(noKey.reply) && noKey.reply.includes("could not be searched"));
 
   // (g) strict/standard switch

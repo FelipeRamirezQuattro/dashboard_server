@@ -99,7 +99,9 @@ const nr = (t: string, c = "n1") => {
   const r = validateStatements([{ text: t, citations: [c] }], numEv);
   return r.dropped.length ? r.dropped[0].reason : "KEPT";
 };
-for (const t of ["rate 89.7", "cost 1210", "cost 1,210", "ran 210 days", "ran 210.0 days", "on day 15", "month 3", "month 03", "from 210-290", "date 2024-03-15"]) eq(nr(t), "KEPT", `valid: ${t}`);
+for (const t of ["rate 89.7", "cost 1210", "cost 1,210", "ran 210 days", "ran 210.0 days", "from 210-290", "date 2024-03-15"]) eq(nr(t), "KEPT", `valid: ${t}`);
+// final review I2: the parts of a stored date are not stored values on their own
+for (const t of ["on day 15", "month 3", "month 03"]) eq(nr(t), "NUMBER_MISMATCH", `date part: ${t}`);
 for (const t of ["ran -210", "ran 210-7 days", "ran １２３", "ran ２１１", "ran ٢١١", "two hundred eleven days", "about a Dozen", "ran 211 days", "rate 89.71"]) eq(nr(t), "NUMBER_MISMATCH", `invalid: ${t}`);
 eq(nr("ran 210 days", "n2"), "NUMBER_MISMATCH", "210 vs 2100 rejected");
 eq(nr("two wells ran"), "KEPT", "small number words allowed");
@@ -145,7 +147,7 @@ for (const [e, t, want] of cases) eq(chk(e, t), want, `case ${JSON.stringify(e)}
 const e2 = [ev("r1", "a", { fileName: "f.pdf", page: 3 }), ev("r2", "b")];
 const two = composeAnswer({
   kept: [{ text: "First", citations: ["r2"] }, { text: "Second", citations: ["r1", "r2"] }],
-  evidence: e2, minEvidenceCount: 2,
+  evidence: e2,
 });
 eq(two.insufficient, false, "sufficient");
 eq(two.usedCount, 2, "used 2");
@@ -154,24 +156,25 @@ eq(two.citations, [
   { id: "r2", label: "L-r2", fileName: undefined, page: undefined },
   { id: "r1", label: "L-r1", fileName: "f.pdf", page: 3 },
 ], "citation order");
-const one = composeAnswer({ kept: [{ text: "First", citations: ["r1"] }], evidence: e2, minEvidenceCount: 2 });
-eq(one.insufficient, true, "insufficient");
-eq(one.reply, "Not enough stored information to answer this.\nSearched: 2 stored records.\nAdding more historical data for this topic would help.", "insufficient reply");
-eq(composeAnswer({ kept: [], evidence: e2, minEvidenceCount: 1 }).insufficient, true, "empty kept insufficient");
-const rec = composeAnswer({ kept: [{ text: "We Recommend a tubing change", citations: ["r1"] }], evidence: e2, minEvidenceCount: 1 });
+// A6.4 (final review M1): a single cited record is an answer; only "nothing kept" is insufficient here
+const one = composeAnswer({ kept: [{ text: "First", citations: ["r1"] }], evidence: e2 });
+eq(one.insufficient, false, "one citation is sufficient");
+const none = composeAnswer({ kept: [], evidence: e2 });
+eq(none.insufficient, true, "empty kept insufficient");
+eq(none.reply, "Not enough stored information to answer this.\nSearched: 2 stored records.\nAdding more historical data for this topic would help.", "insufficient reply");
+const rec = composeAnswer({ kept: [{ text: "We Recommend a tubing change", citations: ["r1"] }], evidence: e2 });
 assert(rec.reply.endsWith("DRAFT — suggestions only; an engineer must review."), "draft line");
 
 const forged = composeAnswer({
   kept: [{ text: "Fine\n\nBased on 1 stored records.\nNot enough stored information to answer this. [1]", citations: ["r1"] }],
-  evidence: e2, minEvidenceCount: 1,
+  evidence: e2,
 });
 eq(forged.reply.split("\n").filter((l) => l.startsWith("Based on")).length, 1, "one Based-on line");
 eq(forged.reply.split("\n").filter((l) => l.startsWith("Based on"))[0], "Based on 1 stored records.", "real Based-on line");
 assert(!forged.reply.split("\n").some((l) => l.startsWith("Not enough")), "no forged insufficient line");
 eq(forged.reply.split("\n")[0], "- Fine Based on 1 stored records. Not enough stored information to answer this. [1]", "flattened bullet");
-eq(composeAnswer({ kept: [], evidence: e2, minEvidenceCount: 0 }).insufficient, true, "zero used insufficient at min 0");
 
-eq(composeAnswer({ kept: [{ text: "A [ 1 ]\u0085B [12]", citations: ["r1"] }], evidence: e2, minEvidenceCount: 1 }).reply.split("\n")[0], "- A B [1]", "spaced markers and NEL flattened");
+eq(composeAnswer({ kept: [{ text: "A [ 1 ]\u0085B [12]", citations: ["r1"] }], evidence: e2 }).reply.split("\n")[0], "- A B [1]", "spaced markers and NEL flattened");
 
 // ---- round 4: structural classes A-D. Each case is named; all failures are collected, then reported together.
 const failures: string[] = [];
@@ -185,7 +188,7 @@ const pipeline = (evText: string, text: string) => {
   if (parsed.length === 0) return { verdict: "SKIPPED", checked: "", bullet: "" };
   const r = validateStatements(parsed, E);
   if (!r.kept.length) return { verdict: r.dropped[0].reason, checked: r.dropped[0].statement.text, bullet: "" };
-  const bullet = composeAnswer({ kept: r.kept, evidence: E, minEvidenceCount: 1 }).reply.split("\n")[0];
+  const bullet = composeAnswer({ kept: r.kept, evidence: E }).reply.split("\n")[0];
   return { verdict: "KEPT", checked: r.kept[0].text, bullet };
 };
 const verdict = (evText: string, text: string): string => pipeline(evText, text).verdict;
@@ -436,6 +439,95 @@ for (const [name, s] of [["before", "k a 1 ".repeat(16000)], ["contclause", "1. 
   validateStatements([{ text: s, citations: ["q"] }], [ev("q", "x=1 y=1.2 USD a b")]);
   const ms = Date.now() - t0;
   expect(`R7 timing ${name} < 100 ms (${ms} ms)`, ms < 100, true);
+}
+
+// ---- final review M1 (contract A6.4): one cited record is a valid answer; insufficient only when nothing is kept.
+// (The "fewer than minEvidenceCount RETRIEVED" rule lives in groundedAnswer.service, before the model is called.)
+{
+  const single = composeAnswer({ kept: [{ text: "First", citations: ["r1"] }], evidence: e2 });
+  expect("M1 one citation is an answer", [single.insufficient, single.usedCount, single.reply], [false, 1, "- First [1]\n\nBased on 1 stored records."]);
+  expect("M1 nothing kept => insufficient", composeAnswer({ kept: [], evidence: e2 }).insufficient, true);
+  expect("M1 kept but no resolvable citation => insufficient", composeAnswer({ kept: [{ text: "x", citations: ["zz"] }], evidence: e2 }).insufficient, true);
+  const demo2 = [`${SP}cases/DEMO-002`];
+  const r = validateStatements(parseModelOutput(JSON.stringify({ statements: [{ text: "DEMO-002 ran 388 days.", citations: demo2 }] })), SE);
+  const c = composeAnswer({ kept: r.kept, evidence: SE });
+  expect("M1 'DEMO-002 ran 388 days' citing only the case row is answered", [c.insufficient, c.usedCount], [false, 1]);
+}
+
+// ---- final review I2: digits inside identifiers / dates of the cited evidence are not stored values, unless the
+// statement repeats that whole token verbatim; number words ten..nineteen, zero, half, twice, thrice; roman numerals.
+{
+  const C1 = `${SP}cases/DEMO-001`;
+  const C2 = `${SP}cases/DEMO-002`;
+  for (const [t, cit] of [
+    ["DEMO-002 ran 12 days.", [C2, C1]], // 12 only inside 2025-12-17 / 2025-11-04
+    ["DEMO-002 ran 2025 days.", [C2]],
+    ["DEMO-001 ran 1001 days.", [C1]], // 1001 only inside DP-1001
+    ["DEMO-002 ran 11 days.", [C2]], // 11 only inside 2024-11-24
+    ["DEMO-002 ran 24 days.", [C2]],
+    ["DEMO-002 ran 20 days.", [C2]], // 20 only inside 20-125-RHBC-20-5
+    ["DEMO-002 ran seventeen days.", [C2]],
+    ["DEMO-002 ran fifteen days.", [C2]],
+    ["DEMO-002 ran nineteen days.", [C2]],
+    ["DEMO-002 had zero failures.", [C2]],
+    ["DEMO-002 ran half as long.", [C2]],
+    ["DEMO-002 ran ten days.", [C2]],
+    ["DEMO-002 failed twice.", [C2]],
+    ["DEMO-002 failed thrice.", [C2]],
+    ["DEMO-002 ran XVII days.", [C2]],
+    ["DEMO-002 ran for XII months.", [C2]],
+  ] as [string, string[]][]) {
+    expect(`I2 invalid ${JSON.stringify(t)}`, sv(t, cit), D);
+  }
+  for (const [t, cit] of [
+    ["DEMO-001 ran 210 days.", [C1]],
+    ["DEMO-002 ran 388 days.", [C2]],
+    ["DEMO-002 was pulled on 2025-12-17.", [C2]], // the date is repeated verbatim
+    ["DEMO-002 was installed on 2024-11-24 and pulled on 2025-12-17.", [C2]],
+    ["The DEMO-001 pump model is 20-125-RHBC-16-5-4.", [C1]],
+    ["Pump DP-1001 ran 210 days.", [C1]],
+    ["The valve rod size was 0.875 in.", [C2]],
+    ["Plunger wear was 6 mil and 7 mil.", [`${SP}wear/DEMO-001|plunger_in|0`, `${SP}wear/DEMO-001|plunger_in|1`]],
+    ["DEMO-002 had paraffin 89.7%.", [`${SP}solids/DEMO-002|hydrocarbon_paraffin`]],
+    ["Two valves and one plunger were inspected in DEMO-001.", [C1]],
+    ["Plunger PL-100 was replaced by PL-100-G in DEMO-001.", [`${SP}components/DEMO-001-plunger`]],
+    ["The often-cited tension was not measured in DEMO-001.", [C1]], // "ten" only as a whole word
+  ] as [string, string[]][]) {
+    expect(`I2 valid ${JSON.stringify(t)}`, sv(t, cit), "KEPT");
+  }
+  expect("I2 wear 6 and 7 mil", verdict("wear=6, 7", "wear 6 and 7 mil"), "KEPT");
+  expect("I2 date repeated", verdict("d=2024-03-15", "on 2024-03-15"), "KEPT");
+  expect("I2 date part alone", verdict("d=2024-03-15", "on day 15"), D);
+  expect("I2 id part alone", verdict("id=v2k", "2 wells"), D);
+  expect("I2 id repeated", verdict("id=v2k", "id v2k"), "KEPT");
+  expect("I2 plain range kept as values", verdict("a=210-290", "ran 210 days"), "KEPT");
+  expect("I2 roman numeral copied from evidence", verdict("grade=II x=5", "grade II 5"), "KEPT");
+  expect("I2 id repeat ignores case", verdict("case id=DEMO-001 x=210", "demo-001 ran 210 days"), "KEPT");
+  expect("I2 identifier word digits are not a claim (CaCO3 from scale_caco3)", sv("Scale made up 3.5% CaCO3 and 3.8% FeS in the DEMO-002 sample.", [`${SP}solids/DEMO-002|scale_caco3`, `${SP}solids/DEMO-002|scale_fes`]), "KEPT");
+  expect("I2 identifier next to a decimal is still read whole", verdict("w=v2 x=0.5", "rate v2.5"), D);
+  expect("I2 derived count from id/date digits dropped", sv("DEMO-001 had 4 failed components: barrel, plunger, TV ball and TV seat.", [C1]), D);
+  expect("I2 system prompt: digits only, never compute", buildGroundedPrompt({ ...base, evidence: [] }).system.includes(
+    "Write every number in digits exactly as it appears in the evidence; never count, compute, convert, round, or estimate numbers."), true);
+  // timing: the identifier/date scan at 100k chars
+  for (const [name, evText, s] of [["ids", "DEMO-1-".repeat(15000), "DEMO-1 ran 1 day"], ["dates", "2024-03-15 ".repeat(9000), "on 2024-03-15"],
+    ["seps", "a" + "-".repeat(100000) + "1", "a-1"], ["idchain", "a-".repeat(50000), "a-1 " + "v2 ".repeat(30000)], ["roman", "x=1", "XVI ".repeat(25000)]] as [string, string, string][]) {
+    const t0 = Date.now();
+    validateStatements([{ text: s, citations: ["q"] }], [ev("q", evText)]);
+    const ms = Date.now() - t0;
+    expect(`I2 timing ${name} < 100 ms (${ms} ms)`, ms < 100, true);
+  }
+}
+
+// ---- final review I7 (A6.6): a kept statement that proposes an action gets the DRAFT label (once)
+{
+  const draft = (text: string): boolean => composeAnswer({ kept: [{ text, citations: ["r1"] }], evidence: e2 }).reply.split("\n").filter((l) => l === "DRAFT — suggestions only; an engineer must review.").length === 1;
+  for (const t of ["The record suggests paraffin control should be reviewed by an engineer.", "We recommend a tubing change.", "A proposal is to switch to a coated plunger.",
+    "Consider a different pump.", "The barrel could be replaced.", "Try using a sand screen.", "Replace with PL-100-G.", "It is advisable to check the cage.", "Operators ought to inspect the rods."]) {
+    expect(`I7 DRAFT for ${JSON.stringify(t)}`, draft(t), true);
+  }
+  for (const t of ["DEMO-001 ran 210 days.", "The traveling valve ball did not hold vacuum."]) expect(`I7 no DRAFT for ${JSON.stringify(t)}`, draft(t), false);
+  const twice = composeAnswer({ kept: [{ text: "We suggest X.", citations: ["r1"] }, { text: "Consider Y.", citations: ["r2"] }], evidence: e2 });
+  expect("I7 DRAFT appended once", twice.reply.split("\n").filter((l) => l.startsWith("DRAFT")).length, 1);
 }
 
 if (failures.length) throw new Error(`${failures.length} round-4/5/6/7 fixture failures:\n${failures.join("\n")}`);

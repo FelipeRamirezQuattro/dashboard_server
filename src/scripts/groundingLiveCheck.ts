@@ -92,6 +92,53 @@ const normNumber = (raw: string): string => {
 };
 const numberTokens = (text: string): string[] => (text.match(NUMBER_RE) ?? []).map(normNumber);
 
+/*
+ * Own identifier/date rule (final review I2), written independently of grounding.ts: the digits inside an identifier
+ * (DEMO-002, DP-1001, scale_caco3, v2k) or a date/serial (2025-12-17, 03/15/2024) of a cited row are not stored
+ * values, unless the bullet repeats that whole token (any case). A word of the bullet that starts with a letter and
+ * contains a digit (CaCO3) is not a number when the cited rows contain that word; anything else is read as numbers.
+ */
+const isStructuredToken = (tok: string): boolean => {
+  const parts = tok.split(/[-_/]/);
+  if (parts.length >= 3 && parts.every((x) => /^\d+$/.test(x))) return true;
+  const letters = /[A-Za-z]/.test(tok);
+  const digits = /\d/.test(tok);
+  return letters && digits && (/^[A-Za-z]/.test(tok) || parts.length > 1);
+};
+const RUN_RE = /[A-Za-z0-9_/-]+/g;
+const trimSeps = (t: string): string => {
+  let a = 0;
+  let b = t.length;
+  while (a < b && "-_/".includes(t[a])) a++;
+  while (b > a && "-_/".includes(t[b - 1])) b--;
+  return t.slice(a, b);
+};
+const structuredTokens = (text: string): string[] =>
+  (text.match(RUN_RE) ?? []).map(trimSeps).filter((t) => t && isStructuredToken(t));
+/** Number tokens a row really stores for this bullet (structured tokens blanked whole, never as substrings). */
+const storedNumbersFor = (rowText: string, bullet: string): string[] => {
+  const repeated = new Set(structuredTokens(bullet).map((t) => t.toLowerCase()));
+  const text = rowText.replace(RUN_RE, (m) => {
+    const t = trimSeps(m);
+    return t && isStructuredToken(t) && !repeated.has(t.toLowerCase()) ? " " : m;
+  });
+  return numberTokens(text);
+};
+/** Number tokens a bullet claims (identifier words found verbatim in the cited rows are not numbers). */
+const claimedNumbers = (bullet: string, rowTexts: string[]): string[] => {
+  const rowWords = new Set(rowTexts.flatMap((t) => t.toLowerCase().split(/[^a-z0-9]+/)));
+  const text = bullet
+    .split(/(?<=[^A-Za-z0-9])|(?=[^A-Za-z0-9])/)
+    .map((w, i, all) => {
+      if (!/^[A-Za-z][A-Za-z0-9]*\d[A-Za-z0-9]*$/.test(w) || !rowWords.has(w.toLowerCase())) return w;
+      const prev = all.slice(Math.max(0, i - 2), i).join("");
+      const next = all.slice(i + 1, i + 3).join("");
+      return /\d[.,]$/.test(prev) || /^[.,]\d/.test(next) ? w : " ";
+    })
+    .join("");
+  return numberTokens(text);
+};
+
 const INSUFFICIENT_LINES = [
   /^Not enough stored information to answer this\.$/,
   /^Searched: \d+ stored records\.$/,
@@ -138,6 +185,10 @@ export const evaluateCase = (
   const citedIds = result.citations.map((x) => x.id);
   let invalidNumbers = 0;
 
+  if (result.status === "unavailable") {
+    // a model / provider / retrieval failure is never a pass, not even for an unanswerable case
+    failures.push("answer service unavailable (model, provider or retrieval failure)");
+  }
   if (evidence.length < meta.minEvidenceCount && meta.modelCalls > 0) {
     failures.push(`model called with ${evidence.length} evidence item(s) < min ${meta.minEvidenceCount}`);
   }
@@ -156,8 +207,8 @@ export const evaluateCase = (
         failures.push("citation marker does not resolve to a retrieved row");
         continue;
       }
-      const stored = new Set(rows.flatMap((r) => numberTokens(r!.text)));
-      for (const n of numberTokens(b.text)) {
+      const stored = new Set(rows.flatMap((r) => storedNumbersFor(r!.text, b.text)));
+      for (const n of claimedNumbers(b.text, rows.map((r) => r!.text))) {
         if (!stored.has(n)) {
           invalidNumbers += 1;
           failures.push(`number ${n} not in cited rows`);
@@ -174,7 +225,7 @@ export const evaluateCase = (
     if (result.insufficient) failures.push("answerable case returned the insufficient reply");
     for (const p of c.mustCite ?? []) if (!citedIds.some((id) => id.startsWith(p))) failures.push(`missing citation ${p}`);
     for (const s of c.mustContain ?? []) if (!reply.includes(s.toLowerCase())) failures.push(`missing "${s}"`);
-  } else if (!result.insufficient) {
+  } else if (!result.insufficient && result.status !== "unavailable") {
     failures.push("non-answerable case returned a non-insufficient reply");
   }
 
@@ -292,7 +343,7 @@ export const dryModel = async (prompt: { system: string; user: string }): Promis
     .filter((x) => x.n > 0)
     .sort((a, b) => b.n - a.n);
   const named = rows.filter((r) => qKeys.some((k) => r.id.toLowerCase().endsWith(`/${k}`)));
-  const ordered = [...named, ...scored.map((x) => x.r), ...rows.slice(0, 3)]; // padded: a lone row can never meet minEvidenceCount
+  const ordered = [...named, ...scored.map((x) => x.r), ...rows.slice(0, 3)]; // padded with the first rows (deterministic)
   const pick = ordered.filter((r, i) => ordered.indexOf(r) === i).slice(0, Math.max(5, named.length));
   return JSON.stringify({ statements: pick.map((r) => ({ text: r.text, citations: [r.id] })) });
 };
