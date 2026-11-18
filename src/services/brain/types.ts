@@ -13,7 +13,7 @@ export interface ColumnDef {
   name: string;
   type: ColumnType;
   required?: boolean;
-  maxLength?: number;
+  maxLength?: number; // default: string 1000, text 4000
   min?: number;
   max?: number;
   values?: string[];

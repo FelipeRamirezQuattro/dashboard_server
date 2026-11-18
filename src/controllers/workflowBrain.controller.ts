@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import * as categoryService from "../services/workflowBrainCategory.service";
 import * as analysisService from "../services/workflowBrainAnalysis.service";
 import { getCategoryState } from "../services/workflowBrainState.service";
-import { canChangeCategorySettings } from "../services/brain/access";
+import { canChangeCategorySettings, categoryUpdateNeedsAdmin } from "../services/brain/access";
 import { filterReadableCategories } from "../services/brain/categoryAccess";
 
 const SETTINGS_KEYS = ["accessRole", "groundingMode", "minEvidenceCount"] as const;
@@ -68,7 +68,8 @@ export const getCategoryById = async (req: Request, res: Response) => {
 
 export const updateCategory = async (req: Request, res: Response) => {
   try {
-    if (bodyHasSettings(req.body) && !canChangeCategorySettings(req.user!.role)) {
+    // settings and isActive (soft delete) are admin-only; editors may still edit name/description/domain
+    if (categoryUpdateNeedsAdmin(req.body) && !canChangeCategorySettings(req.user!.role)) {
       res.status(403).json(FORBIDDEN_SETTINGS);
       return;
     }

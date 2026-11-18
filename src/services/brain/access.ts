@@ -38,6 +38,13 @@ export const roleMeets = (userRole: UserRole, minRole: CategoryAccessRole): bool
 export const canChangeCategorySettings = (userRole: UserRole): boolean =>
   roleMeets(userRole, "admin");
 
+/** PATCH fields that need admin: the settings and isActive (a soft delete / restore; DELETE already needs admin). */
+const ADMIN_ONLY_UPDATE_KEYS = ["accessRole", "groundingMode", "minEvidenceCount", "isActive"] as const;
+export const categoryUpdateNeedsAdmin = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  ADMIN_ONLY_UPDATE_KEYS.some((key) => (body as Record<string, unknown>)[key] !== undefined);
+
 export const BRAIN_CHAT_ACCESS_DENIED_REPLY = "You don't have access to that Workflow Brain category.";
 
 const KNOWN_ROLES: readonly UserRole[] = ["viewer", "editor", "admin", "superadmin"];

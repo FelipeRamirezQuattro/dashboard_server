@@ -26,6 +26,7 @@ import {
 } from "../services/brain/datasets.service";
 import { reindexCategory } from "../services/brain/indexer.service";
 import { MAX_CSV_BYTES } from "../services/brain/csv";
+import { fixMulterFilename } from "../services/brain/fileBankAccess";
 import { recordBrainAudit } from "../services/brainAudit.service";
 import logger from "../utils/logger";
 
@@ -96,7 +97,7 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     const tags = f.tags ? f.tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
     const doc = await createDocument({
       categoryId: req.params.categoryId,
-      file: { buffer: req.file.buffer, originalname: req.file.originalname, mimetype: req.file.mimetype },
+      file: { buffer: req.file.buffer, originalname: fixMulterFilename(req.file.originalname), mimetype: req.file.mimetype },
       meta: { title: f.title, kind: f.kind as never, version: f.version, source: f.source, tags },
       userId: req.user!._id.toString(),
     });

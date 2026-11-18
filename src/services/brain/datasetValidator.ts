@@ -33,7 +33,8 @@ const coerce = (col: ColumnDef, raw: string): Coerced => {
   if (!freeText && NULL_TOKENS.has(raw.toLowerCase())) {
     return fail("NULL_TOKEN", `${col.name}: "${raw}" is not allowed; leave the cell empty`);
   }
-  const maxLength = col.maxLength ?? (col.type === "text" ? 4000 : undefined);
+  // defaults: text 4000, string 1000 (a column definition's maxLength always wins)
+  const maxLength = col.maxLength ?? (col.type === "text" ? 4000 : col.type === "string" ? 1000 : undefined);
   if (maxLength !== undefined && raw.length > maxLength) {
     return fail("TOO_LONG", `${col.name} exceeds ${maxLength} characters`);
   }

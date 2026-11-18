@@ -2,6 +2,7 @@
 import {
   BrainAccessError,
   canChangeCategorySettings,
+  categoryUpdateNeedsAdmin,
   effectiveAccessRole,
   effectiveGroundingMode,
   effectiveMinEvidenceCount,
@@ -73,4 +74,11 @@ assert(effectiveMinEvidenceCount({ minEvidenceCount: 99 }) === 10, "clamp high t
 assert(effectiveMinEvidenceCount({ minEvidenceCount: 4.7 }) === 4, "floored");
 assert(effectiveMinEvidenceCount({ minEvidenceCount: 5 }) === 5, "valid kept");
 
+// final review S1: PATCH isActive (soft delete / restore) needs admin like the settings fields; editors keep name etc.
+for (const body of [{ isActive: false }, { isActive: true }, { name: "x", isActive: false }, { accessRole: "viewer" }, { groundingMode: "strict" }, { minEvidenceCount: 3 }, { isActive: null }]) {
+  assert(categoryUpdateNeedsAdmin(body), `needs admin: ${JSON.stringify(body)}`);
+}
+for (const body of [{ name: "x" }, { description: "d", domain: "general" }, {}, null, "x", { isActive: undefined }]) {
+  assert(!categoryUpdateNeedsAdmin(body), `editor may: ${JSON.stringify(body)}`);
+}
 console.log("access fixtures passed");

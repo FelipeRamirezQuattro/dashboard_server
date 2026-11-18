@@ -269,6 +269,15 @@ test("- and null rejected in integer column", () => {
   }
 });
 
+test("final review S5: string columns default to maxLength 1000; text stays 4000", () => {
+  assert(!hasReject(run(`id,note\n${"s".repeat(1000)},x\n`), "TOO_LONG"), "1000-char string accepted");
+  assert(hasReject(run(`id,note\n${"s".repeat(1001)},x\n`), "TOO_LONG"), "1001-char string rejected");
+  assert(!hasReject(run(`id,note\np1,${"t".repeat(4000)}\n`), "TOO_LONG"), "4000-char text accepted");
+  assert(hasReject(run(`id,note\np1,${"t".repeat(4001)}\n`), "TOO_LONG"), "4001-char text rejected");
+  const wide: DatasetDefinition = { ...def, tables: [{ ...def.tables[0], columns: [{ name: "id", type: "string", required: true, maxLength: 5000 }, { name: "note", type: "text" }] }] };
+  assert(!hasReject(run(`id,note\n${"s".repeat(4500)},x\n`, undefined, wide), "TOO_LONG"), "explicit maxLength wins");
+});
+
 let failed = 0;
 for (const c of cases) {
   try {
