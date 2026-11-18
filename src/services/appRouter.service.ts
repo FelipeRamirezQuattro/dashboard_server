@@ -1,36 +1,35 @@
+import mongoose from "mongoose";
 import { ExternalAppClientFactory } from "./externalApp.client";
 import ExternalApp from "../models/App.model";
 import logger from "../utils/logger";
 import { env } from "../config/env";
+import {
+  ExternalChatbotRequest,
+  ExternalChatbotResponse,
+  externalChatbotRequestSchema,
+  externalChatbotResponseSchema,
+  wrappedExternalChatbotResponseSchema,
+} from "../contracts/externalChatbot.contract";
+import { recordChatbotAutomationAudit } from "./chatbotAutomationAudit.service";
+import { checkUserAppAccess } from "./permissions.service";
+import User from "../models/User.model";
 
 /**
  * Standard chatbot query request to external apps
  */
-interface ChatbotQueryRequest {
-  message: string;
-  userId?: string;
-  sessionId?: string;
-  context?: Record<string, any>;
-}
+type ChatbotQueryRequest = ExternalChatbotRequest;
 
 /**
  * Standard chatbot query response from external apps
  */
-interface ChatbotQueryResponse {
-  success: boolean;
-  reply: string;
-  timestamp: string;
-  confidence?: number;
-  metadata?: {
-    queryType?: string;
-    resultsCount?: number;
-    processingMethod?: "pattern_match" | "ai_fallback";
-  };
-  error?: {
-    code: string;
-    message: string;
-  };
-}
+type ChatbotQueryResponse = ExternalChatbotResponse;
+
+export const shouldRetryExternalChatbotRequest = (
+  operationType: "read" | "write",
+  errorCode?: string,
+): boolean => {
+  return operationType === "read" && errorCode === "NETWORK_ERROR";
+};
 
 /**
  * AppRouterService
@@ -44,6 +43,7 @@ class AppRouterService {
     const apiKeyMap: Record<string, string | undefined> = {
       "Chemical Tracker": env.chemtrackerChatbotApiKey,
       "Designer": env.designerChatbotApiKey,
+      "Internal AI Assistant": env.internalAiAssistantChatbotApiKey,
       "OSI Pump Pro": env.pumpTrackerChatbotApiKey,
       "Pump Tracker": env.pumpTrackerChatbotApiKey,
     };
@@ -100,6 +100,7 @@ class AppRouterService {
       "Pump Tracker": ["Pump Tracker", "OSI Pump Pro", "OSI Pump Tracker"],
       Designer: ["Designer", "OSI Designer"],
       "Chemical Tracker": ["Chemical Tracker", "Chem Tracker"],
+      "Internal AI Assistant": ["Internal AI Assistant"],
     };
 
     return aliases[appName] || [appName];
@@ -116,6 +117,7 @@ class AppRouterService {
     // Map app names to their chatbot endpoints (relative to base URL)
     const endpointMap: Record<string, string> = {
       "Chemical Tracker": "/chatbot/query",
+      "Internal AI Assistant": "/chatbot/query",
       "OSI Pump Pro": "/chatbot/query",
       Designer: "/chatbot/query",
       "Gas Separator": "/chatbot/query",
@@ -123,6 +125,20 @@ class AppRouterService {
 
     // Return app-specific endpoint or default to generic endpoint
     return endpointMap[appName] || "/chatbot/query";
+  }
+
+  /**
+   * Check the user may use the app. The role is read from the DB (never from
+   * the client-supplied context) so it cannot be spoofed.
+   */
+  private async userCanAccessApp(
+    userId: string | undefined,
+    appId: string,
+  ): Promise<boolean> {
+    if (!userId || !mongoose.isValidObjectId(userId)) return false;
+    const user = await User.findById(userId).select("role isActive").lean();
+    if (!user || user.isActive === false) return false;
+    return checkUserAppAccess(userId, user.role, appId);
   }
 
   /**
@@ -166,6 +182,31 @@ class AppRouterService {
         };
       }
 
+      // Enforce application access for every chat path (auto-route, explicit
+      // target, direct external_app). Fails closed when the user is unknown.
+      const hasAccess = await this.userCanAccessApp(userId, app._id.toString());
+      if (!hasAccess) {
+        await recordChatbotAutomationAudit({
+          userId,
+          action: "CHAT_APP_AUTHZ_DENIED",
+          target: app.name,
+          metadata: {
+            requestId: context?.requestId,
+            appName: app.name,
+            route: context?.routeMetadata?.route,
+          },
+        });
+        return {
+          success: false,
+          reply: `You don't have access to ${appName}. Please contact your administrator.`,
+          timestamp: new Date().toISOString(),
+          error: {
+            code: "APP_ACCESS_DENIED",
+            message: `User is not authorized to use ${appName}`,
+          },
+        };
+      }
+
       // Require dedicated chatbot API URL — do not fall back to launch URL
       if (!app.chatbotApiUrl) {
         logger.warn(`${appName} has no chatbotApiUrl configured`);
@@ -200,54 +241,71 @@ class AppRouterService {
         `Routing query to ${appName} (${chatbotTarget.mode}: ${chatbotTarget.baseUrl}${chatbotTarget.endpoint})`,
       );
 
-      const request: ChatbotQueryRequest = {
+      const request = externalChatbotRequestSchema.parse({
         message,
         userId,
         sessionId,
-        context,
-      };
+        context: {
+          ...(context || {}),
+          operationType: context?.operationType || "read",
+        },
+      });
+      const operationType = request.context?.operationType || "read";
 
-      let response = await client.post<ChatbotQueryResponse>(
+      let response = await client.post<unknown>(
         chatbotTarget.endpoint,
         request,
       );
-      if (!response.success && response.error?.code === "NETWORK_ERROR") {
+      if (
+        !response.success &&
+        shouldRetryExternalChatbotRequest(operationType, response.error?.code)
+      ) {
         logger.warn(`${appName} network error; retrying once`);
-        response = await client.post<ChatbotQueryResponse>(
+        response = await client.post<unknown>(
           chatbotTarget.endpoint,
           request,
         );
       }
 
-      // Support two response shapes from external apps:
-      // 1) Wrapped: { success, data: { success, reply, ... } }
-      // 2) Direct:  { success, reply, ... }
-      const wrappedResponse = response as {
-        success?: boolean;
-        data?: ChatbotQueryResponse;
-        error?: { code: string; message: string };
-      };
-      const directResponse = response as unknown as ChatbotQueryResponse;
+      const parsedResponse = this.parseExternalResponse(
+        appName,
+        response,
+        request,
+        Date.now() - startedAt,
+      );
 
-      if (wrappedResponse.success && wrappedResponse.data) {
-        logger.info(
-          `${appName} responded successfully (wrapped format, ${Date.now() - startedAt}ms)`,
-        );
-        return wrappedResponse.data;
+      if (parsedResponse) {
+        await recordChatbotAutomationAudit({
+          userId,
+          action: "CHAT_EXTERNAL_APP_QUERY",
+          target: appName,
+          metadata: {
+            requestId: request.context?.requestId,
+            appName,
+            route: request.context?.routeMetadata?.route,
+            matchedRule: request.context?.routeMetadata?.matchedRule,
+            success: parsedResponse.success,
+            latency: Date.now() - startedAt,
+            operationType,
+            sourceSystem: parsedResponse.metadata?.sourceSystem,
+          },
+        });
+        return parsedResponse;
       }
 
-      if (directResponse.success && directResponse.reply) {
-        logger.info(
-          `${appName} responded successfully (direct format, ${Date.now() - startedAt}ms)`,
-        );
-        return directResponse;
-      }
-
+      const wrappedResponse = wrappedExternalChatbotResponseSchema
+        .partial()
+        .safeParse(response);
+      const directResponse = externalChatbotResponseSchema
+        .partial()
+        .safeParse(response);
       const errorCode =
-        wrappedResponse.error?.code || directResponse.error?.code || "UNKNOWN_ERROR";
+        wrappedResponse.data?.error?.code ||
+        directResponse.data?.error?.code ||
+        "UNKNOWN_ERROR";
       const errorMessage =
-        wrappedResponse.error?.message ||
-        directResponse.error?.message ||
+        wrappedResponse.data?.error?.message ||
+        directResponse.data?.error?.message ||
         "No error details returned by the configured chatbot endpoint.";
       logger.error(
         `${appName} returned error from ${chatbotTarget.mode} endpoint ${chatbotTarget.baseUrl}${chatbotTarget.endpoint}: ${errorCode} - ${errorMessage}`,
@@ -273,6 +331,66 @@ class AppRouterService {
         },
       };
     }
+  }
+
+  private parseExternalResponse(
+    appName: string,
+    response: unknown,
+    request: ChatbotQueryRequest,
+    durationMs: number,
+  ): ChatbotQueryResponse | null {
+    const wrappedResponse = wrappedExternalChatbotResponseSchema.safeParse(response);
+    if (wrappedResponse.success && wrappedResponse.data.success && wrappedResponse.data.data) {
+      logger.info(
+        `${appName} responded successfully (wrapped format, ${durationMs}ms)`,
+      );
+      return {
+        ...wrappedResponse.data.data,
+        metadata: {
+          ...(wrappedResponse.data.data.metadata || {}),
+          requestId:
+            wrappedResponse.data.data.metadata?.requestId ||
+            request.context?.requestId,
+          durationMs:
+            wrappedResponse.data.data.metadata?.durationMs || durationMs,
+        },
+      };
+    }
+
+    const directResponse = externalChatbotResponseSchema.safeParse(response);
+    if (directResponse.success) {
+      logger.info(
+        `${appName} responded successfully (direct format, ${durationMs}ms)`,
+      );
+      return {
+        ...directResponse.data,
+        metadata: {
+          ...(directResponse.data.metadata || {}),
+          requestId:
+            directResponse.data.metadata?.requestId || request.context?.requestId,
+          durationMs: directResponse.data.metadata?.durationMs || durationMs,
+        },
+      };
+    }
+
+    recordChatbotAutomationAudit({
+      userId: request.userId,
+      action: "INTERNAL_AI_CONTRACT_ERROR",
+      target: appName,
+      metadata: {
+        requestId: request.context?.requestId,
+        appName,
+        route: request.context?.routeMetadata?.route,
+        wrappedIssues: wrappedResponse.success
+          ? undefined
+          : wrappedResponse.error.issues.map((issue) => issue.path.join(".")),
+        directIssues: directResponse.success
+          ? undefined
+          : directResponse.error.issues.map((issue) => issue.path.join(".")),
+      },
+    });
+
+    return null;
   }
 
   /**

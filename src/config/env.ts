@@ -33,6 +33,7 @@ interface EnvConfig {
   // External app chatbot service-to-service API keys (Optional)
   chemtrackerChatbotApiKey?: string;
   designerChatbotApiKey?: string;
+  internalAiAssistantChatbotApiKey?: string;
   pumpTrackerChatbotApiKey?: string;
   // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
   enableN8nChatbot: boolean;
@@ -133,6 +134,8 @@ export const env: EnvConfig = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   chemtrackerChatbotApiKey: process.env.CHEMTRACKER_CHATBOT_API_KEY,
   designerChatbotApiKey: process.env.DESIGNER_CHATBOT_API_KEY,
+  internalAiAssistantChatbotApiKey:
+    process.env.INTERNAL_AI_ASSISTANT_CHATBOT_API_KEY,
   pumpTrackerChatbotApiKey: process.env.PUMPTRACKER_CHATBOT_API_KEY,
   // n8n Webhook Chatbot (Alternative approach — set ENABLE_N8N_CHATBOT=true to activate)
   enableN8nChatbot:

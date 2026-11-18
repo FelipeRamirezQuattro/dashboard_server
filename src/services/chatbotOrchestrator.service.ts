@@ -6,6 +6,13 @@ import { documentSearchService } from "./documentSearch.service";
 import { n8nWebhookProvider } from "./n8nWebhook.service";
 import { oneDriveService } from "./oneDrive.service";
 import { workflowBrainChatService } from "./workflowBrainChat.service";
+import { answerRodPumpQuestion } from "./brain/rodPumpChat";
+import {
+  decideChatRoute,
+  RoutePolicyDecision,
+  RouteTarget,
+} from "./chatbotRoutePolicy.service";
+import { recordChatbotAutomationAudit } from "./chatbotAutomationAudit.service";
 import { recordBrainAudit } from "./brainAudit.service";
 import {
   asKnownRole,
@@ -21,26 +28,12 @@ import {
 import { env } from "../config/env";
 import logger from "../utils/logger";
 
-type RouteTarget =
-  | "file_bank"
-  | "onedrive"
-  | "chemical_tracker"
-  | "designer"
-  | "pump_tracker"
-  | "workflow_brain"
-  | "general"
-  | "clarify";
+type RouteDecision = RoutePolicyDecision;
 
-interface RouteDecision {
-  route: RouteTarget;
-  query: string;
-  confidence: number;
-  category?: string;
-}
-
-const APP_ROUTES: Record<Exclude<RouteTarget, "file_bank" | "onedrive" | "workflow_brain" | "general" | "clarify">, string> = {
+const APP_ROUTES: Record<Exclude<RouteTarget, "file_bank" | "onedrive" | "workflow_brain" | "rod_pump_failure" | "general" | "clarify">, string> = {
   chemical_tracker: "Chemical Tracker",
   designer: "Designer",
+  internal_ai_assistant: "Internal AI Assistant",
   pump_tracker: "OSI Pump Pro",
 };
 
@@ -122,6 +115,16 @@ class ChatbotOrchestrator {
       return this.routeExplicitTarget(message, request);
     }
 
+    const deterministicRoute = this.getDeterministicRoute(message);
+    await this.auditRouteDecision(deterministicRoute, request);
+
+    if (
+      deterministicRoute.route === "internal_ai_assistant" &&
+      deterministicRoute.bypassN8n
+    ) {
+      return this.routeToApp(deterministicRoute, message, request);
+    }
+
     if (env.enableN8nChatbot) {
       const response = await n8nWebhookProvider.getResponse(message, request);
       return { ...response, source: "n8n", routedTo: "n8n" };
@@ -140,10 +143,14 @@ class ChatbotOrchestrator {
       if (response) return response;
     }
 
-    const deterministicRoute = this.getDeterministicRoute(message);
+    if (deterministicRoute.route === "rod_pump_failure") {
+      return this.routeToRodPumpBrain(deterministicRoute, message, request);
+    }
+
     if (
       deterministicRoute.route === "chemical_tracker" ||
       deterministicRoute.route === "designer" ||
+      deterministicRoute.route === "internal_ai_assistant" ||
       deterministicRoute.route === "pump_tracker"
     ) {
       return this.routeToApp(deterministicRoute, message, request);
@@ -178,9 +185,17 @@ class ChatbotOrchestrator {
       };
     }
 
+    if (aiDecision.route === "rod_pump_failure") {
+      if (aiDecision.confidence < 0.55) {
+        return this.clarifyResponse();
+      }
+      return this.routeToRodPumpBrain(aiDecision, message, request);
+    }
+
     if (
       aiDecision.route === "chemical_tracker" ||
       aiDecision.route === "designer" ||
+      aiDecision.route === "internal_ai_assistant" ||
       aiDecision.route === "pump_tracker"
     ) {
       if (aiDecision.confidence < 0.55) {
@@ -326,51 +341,7 @@ class ChatbotOrchestrator {
   }
 
   private getDeterministicRoute(message: string): RouteDecision {
-    const msg = message.toLowerCase();
-
-    if (
-      /\b(chem|chemical)\s*-?\s*tracker\b/.test(msg) ||
-      /\b(wells?|clients?|chemicals?|analytics)\b.*\b(chem|chemical)\b/.test(msg)
-    ) {
-      return { route: "chemical_tracker", query: message, confidence: 0.95 };
-    }
-
-    if (
-      /\bdesigner\b/.test(msg) ||
-      /\b(proposals?|sales\s*orders?|wellbore|tally|designs?|simulation)\b/.test(msg)
-    ) {
-      return { route: "designer", query: message, confidence: 0.9 };
-    }
-
-    if (/\b(pump\s*-?\s*tracker|pump\s+pro|rod\s*pump|pump\s+performance|pumps?)\b/.test(msg)) {
-      return { route: "pump_tracker", query: message, confidence: 0.9 };
-    }
-
-    if (
-      /\b(workflow\s+brain|process\s+brain|design\s+brain|category\s+memory|workflow\s+category|osi\s+process|separator\s+workflow|design\s+checklist)\b/.test(msg) ||
-      /\b(workflow|process|handoff|checklist|unknown\s+areas?)\b.*\b(separator|design|engineering|qa|qc|proposal|sales)\b/.test(msg)
-    ) {
-      return {
-        route: "workflow_brain",
-        query: message,
-        confidence: 0.9,
-        category: this.detectWorkflowBrainCategory(msg),
-      };
-    }
-
-    return { route: "clarify", query: message, confidence: 0 };
-  }
-
-  private detectWorkflowBrainCategory(message: string): string | undefined {
-    if (/\b(gas|separator|separation)\b/.test(message)) return "Gas Separation";
-    if (/\b(chemical|treatment)\b/.test(message)) return "Chemical Treatment";
-    if (/\b(sand|filtration|filter)\b/.test(message)) return "Sand / Filtration Control";
-    if (/\b(sales|handoff)\b/.test(message)) return "Sales Engineering";
-    if (/\b(qa|qc|quality|inspection)\b/.test(message)) return "QA/QC";
-    if (/\b(proposal|proposals)\b/.test(message)) return "Proposals";
-    if (/\b(field service|service)\b/.test(message)) return "Field Service";
-    if (/\b(manufacturing|shop|fabrication)\b/.test(message)) return "Manufacturing";
-    return undefined;
+    return decideChatRoute(message);
   }
 
   private async getAiRoute(
@@ -378,7 +349,14 @@ class ChatbotOrchestrator {
     history: ContextTurn[],
   ): Promise<RouteDecision> {
     if (!this.openai || !env.enableAiFallback) {
-      return { route: "clarify", query: message, confidence: 0 };
+      return {
+        route: "clarify",
+        query: message,
+        confidence: 0,
+        matchedRule: "ai_disabled",
+        bypassN8n: false,
+        reason: "AI fallback disabled.",
+      };
     }
 
     try {
@@ -390,7 +368,7 @@ class ChatbotOrchestrator {
           {
             role: "system",
             content:
-              "Route OSI assistant requests. Return only JSON with route, query, confidence, and optional category. Routes: file_bank, onedrive, chemical_tracker, designer, pump_tracker, workflow_brain, general, clarify. Use file_bank/onedrive for documents, PDFs, reports, invoices, proposals requested as files. Use chemical_tracker for wells, clients, chemicals, analytics. Use designer for proposals, sales orders, designs, tallies, simulations. Use pump_tracker for pump status, pump reports, pump performance. Use workflow_brain for process memory, workflow notes, category memory, design checklists, OSI process questions, separator workflow, handoff risks, unknown areas, and operational/design-support workflow guidance.",
+              "Route OSI assistant requests. Return only JSON with route, query, confidence, and optional category. Routes: file_bank, onedrive, chemical_tracker, designer, internal_ai_assistant, pump_tracker, rod_pump_failure, workflow_brain, general, clarify. Use file_bank/onedrive for documents, PDFs, reports, invoices, proposals requested as files. Use chemical_tracker for wells, clients, chemicals, analytics. Use internal_ai_assistant for ERP data questions, explicit sales order numbers, official sales-order PDFs, file-server sales-order PDF lookup, and drafting or editing technical proposals. Use designer for Designer app workflows, wellbore designs, tallies, simulations, and proposals explicitly in Designer. Use pump_tracker for pump status, pump reports, pump performance. Use rod_pump_failure for rod pump failure analysis, failure modes, run life, similar failure cases, and failure-based design recommendations. Use workflow_brain for process memory, workflow notes, category memory, design checklists, OSI process questions, separator workflow, handoff risks, unknown areas, and operational/design-support workflow guidance.",
           },
           ...history.slice(-8).map((turn) => ({
             role: turn.role,
@@ -408,14 +386,23 @@ class ChatbotOrchestrator {
         "onedrive",
         "chemical_tracker",
         "designer",
+        "internal_ai_assistant",
         "pump_tracker",
+        "rod_pump_failure",
         "workflow_brain",
         "general",
         "clarify",
       ];
 
       if (!validRoutes.includes(route)) {
-        return { route: "clarify", query: message, confidence: 0 };
+        return {
+          route: "clarify",
+          query: message,
+          confidence: 0,
+          matchedRule: "ai_invalid_route",
+          bypassN8n: false,
+          reason: "AI router returned an invalid route.",
+        };
       }
 
       return {
@@ -423,13 +410,42 @@ class ChatbotOrchestrator {
         query: parsed.query || message,
         confidence:
           typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
+        matchedRule: "ai_router",
+        bypassN8n: false,
+        reason: "AI fallback route classification.",
         category:
           typeof parsed.category === "string" ? parsed.category : undefined,
       };
     } catch (error) {
       logger.warn("AI route classification failed:", error);
-      return { route: "clarify", query: message, confidence: 0 };
+      return {
+        route: "clarify",
+        query: message,
+        confidence: 0,
+        matchedRule: "ai_error",
+        bypassN8n: false,
+        reason: "AI route classification failed.",
+      };
     }
+  }
+
+  private async auditRouteDecision(
+    decision: RouteDecision,
+    request: ChatRequest,
+  ): Promise<void> {
+    await recordChatbotAutomationAudit({
+      userId: request.userId,
+      action: "CHAT_ROUTE_DECISION",
+      target: "chatbot",
+      metadata: {
+        requestId: request.context?.requestId,
+        route: decision.route,
+        matchedRule: decision.matchedRule,
+        confidence: decision.confidence,
+        bypassN8n: decision.bypassN8n,
+        reason: decision.reason,
+      },
+    });
   }
 
   private async routeToApp(
@@ -440,11 +456,22 @@ class ChatbotOrchestrator {
     const appName = APP_ROUTES[
       decision.route as keyof typeof APP_ROUTES
     ];
+    const context = {
+      ...(request.context || {}),
+      operationType: request.context?.operationType || "read",
+      routeMetadata: {
+        route: decision.route,
+        matchedRule: decision.matchedRule,
+        confidence: decision.confidence,
+        bypassN8n: decision.bypassN8n,
+        reason: decision.reason,
+      },
+    };
     const result = await appRouterService.queryApp(
       appName,
       decision.query || message,
       request.userId,
-      request.context,
+      context,
       request.sessionId,
     );
 
@@ -454,7 +481,43 @@ class ChatbotOrchestrator {
       confidence: result.success ? result.confidence || decision.confidence : 0,
       source: result.success ? "app" : "error",
       routedTo: appName,
+      metadata: result.metadata,
     };
+  }
+
+  /**
+   * Rod Pump Failure answers in-process for admins; viewers/editors and setups without the
+   * category keep the previous behavior (Pump Pro app call).
+   */
+  private async routeToRodPumpBrain(
+    decision: RouteDecision,
+    message: string,
+    request: ChatRequest,
+  ): Promise<ChatResponse> {
+    const brainRole = asKnownRole(request.userRole);
+    const result = brainRole
+      ? await answerRodPumpQuestion({
+          message: decision.query || message,
+          user: { id: request.userId || "", role: brainRole },
+        })
+      : ({ route: "fallback_pump_pro" } as const);
+
+    if (result.route === "brain") {
+      return {
+        reply: result.reply,
+        timestamp: new Date(),
+        confidence: result.status === "unavailable" ? 0 : result.insufficient ? 0.4 : 0.9,
+        source: "workflow_brain",
+        routedTo: "Rod Pump Failure",
+        ...(result.citations ? { metadata: { citations: result.citations } } : {}),
+      };
+    }
+
+    return this.routeToApp(
+      { ...decision, route: "pump_tracker" },
+      message,
+      request,
+    );
   }
 
   private async routeToWorkflowBrain(decision: RouteDecision): Promise<ChatResponse> {

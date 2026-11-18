@@ -19,6 +19,26 @@ export interface ChatRequest {
       content: string;
     }>;
     target?: ChatTarget;
+    requestId?: string;
+    operationType?: "read" | "write";
+    idempotencyKey?: string;
+    routeMetadata?: {
+      route?: string;
+      matchedRule?: string;
+      confidence?: number;
+      bypassN8n?: boolean;
+      reason?: string;
+    };
+    user?: {
+      id?: string;
+      email?: string;
+      role?: string;
+    };
+    permissions?: {
+      businessUnits?: string[];
+      departments?: string[];
+      applications?: string[];
+    };
   };
 }
 

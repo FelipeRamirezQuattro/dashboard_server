@@ -9,8 +9,10 @@
     "start": "node dist/index.js",
     "seed": "ts-node src/seeds/seed.ts",
     "seed:hierarchy": "ts-node src/seeds/seedHierarchy.ts",
+    "test:routes": "ts-node src/tests/chatbotRoutePolicy.fixtures.ts",
+    "test:contracts": "ts-node src/tests/externalChatbotContract.fixtures.ts",
     "lint": "eslint src --ext .ts",
-    "test:brain": "ts-node src/tests/brain/run.ts",
+    "test:brain": "NODE_ENV=test ts-node src/tests/brain/run.ts",
     "brain:rodpump": "ts-node src/scripts/registerRodPumpBrain.ts",
     "brain:grounding-live": "ts-node src/scripts/groundingLiveCheck.ts",
     "brain:grounding-dry": "ts-node src/scripts/groundingLiveCheck.ts --dry"
