@@ -126,7 +126,14 @@ export async function answerGroundedWith(ports: GroundedPorts, p: GroundedInput)
   } catch (e) {
     // GroundingError(BAD_MODEL_OUTPUT: non-JSON / truncated output), provider errors, timeouts, bad key: the model did
     // not produce a valid answer => unavailable (not "missing data"); never an ungrounded fallback
-    logger.warn(`[brain:grounded] categoryId=${categoryId} model failed error=${e instanceof Error ? e.name : "Error"}`);
+    // Only non-content diagnostics (provider HTTP status / error code / GroundingError code); never message text.
+    const d = e as { status?: unknown; code?: unknown; type?: unknown };
+    const extra = [
+      typeof d.status === "number" ? `status=${d.status}` : "",
+      typeof d.code === "string" ? `code=${d.code.slice(0, 60)}` : "",
+      typeof d.type === "string" ? `type=${d.type.slice(0, 60)}` : "",
+    ].filter(Boolean).join(" ");
+    logger.warn(`[brain:grounded] categoryId=${categoryId} model failed error=${e instanceof Error ? e.name : "Error"}${extra ? " " + extra : ""} model=${env.brainAnswerModel}`);
     return finish(unavailable(), evidence.length, "model_error");
   }
   const { kept, dropped } = validateStatements(statements, evidence);
