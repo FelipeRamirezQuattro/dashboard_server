@@ -1,0 +1,12 @@
+case_id,component_id,component_type,part_condition,api_class,observed_modes,valve_test,is_primary_failure,part_number,material,quantity,replaced_by_part_number,comment
+DEMO-001,DEMO-001-plunger,plunger,worn,C,wear,,true,PL-100,SM/MP,1,PL-100-G,Mic readings up to 0.007 in
+DEMO-001,DEMO-001-barrel,barrel,worn,B,wear,,false,BR-200,BR/NC,1,,Mic readings up to 0.006 in
+DEMO-001,DEMO-001-tv-ball,traveling_valve_ball,leaked,,seal_loss_vacuum_fail,leaks,true,TVB-10,SN,1,,Did not hold vacuum
+DEMO-001,DEMO-001-tv-seat,traveling_valve_seat,leaked,,seal_loss_vacuum_fail,leaks,true,TVS-11,CAR,1,,Did not hold vacuum
+DEMO-002,DEMO-002-plunger,plunger,scored,C,scoring;wear,,false,PL-100,SM/MP,1,PL-100-G,Scored surface
+DEMO-002,DEMO-002-vr-bushing,valve_rod_bushing,galled,,galling,,true,VRB-30,SS,1,,Tagging damage
+DEMO-002,DEMO-002-collet-nut,collet_nut,galled,,galling,,false,CN-31,SS,1,,
+DEMO-002,DEMO-002-sv-cage,standing_valve_cage,galled,,galling,,true,SVC-40,SS,1,,Galled to secondary cage
+DEMO-002,DEMO-002-barrel,barrel,beyond_run_life,B,beyond_run_life,,false,BR-200,BR/NC,1,,
+DEMO-003,DEMO-003-plunger,plunger,good,A,,,false,PL-100,SM/MP,1,,
+DEMO-003,DEMO-003-barrel,barrel,good,A,,,false,BR-200,BR/NC,1,,

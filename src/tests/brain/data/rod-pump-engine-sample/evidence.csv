@@ -1,0 +1,3 @@
+evidence_id,case_id,kind,file_name,page,caption
+EV-001,DEMO-001,report_pdf,demo-001-teardown-report.pdf,1,Teardown summary
+EV-002,DEMO-002,photo,demo-002-plunger-scoring.jpg,,Plunger scored surface

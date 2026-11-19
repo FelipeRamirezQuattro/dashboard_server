@@ -1,0 +1,4 @@
+case_id,pump_serial,pump_model,pull_date,days_run,install_date,reason_for_pulling,failure_cause_label,primary_failure_mechanism,max_stroke_in,valve_rod_size_in,inspection_summary,remarks,client_label
+DEMO-001,DP-1001,20-125-RHBC-16-5-4,2025-11-04,210,2025-04-08,pump_failure,Pump failure,wear;seal_loss_vacuum_fail,167,0.875,"Plunger and barrel show excessive wear. Traveling valve ball and seat did not hold vacuum.",,Demo Client
+DEMO-002,DP-1002,20-125-RHBC-20-5,2025-12-17,388,2024-11-24,pump_failure,Pump failure,galling;paraffin_deposit,167,0.875,"Valve rod bushing and collet nut galled. Standing valve cage galled to secondary cage. Paraffin sample taken.",,Demo Client
+DEMO-003,DP-1003,25-150-RHBC-16-5-4,2026-01-22,95,,tubing_failure,Tubing failure,,192,1.000,"Pull caused by tubing failure. Pump components in good condition on inspection.",No install date on record,Demo Client

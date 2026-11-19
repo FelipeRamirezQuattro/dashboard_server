@@ -9,7 +9,7 @@ import { buildRecordCards, primaryKeyValueOf } from "../../services/brain/record
 import type { ChunkLite, DocumentLite, RecordLite, RetrievalPorts } from "../../services/brain/retrieval";
 import type { DatasetDefinition } from "../../services/brain/types";
 
-export const SAMPLE_DIR = path.resolve(__dirname, "../../../../docs/rod-pump-failure-sample-data");
+export const SAMPLE_DIR = path.resolve(__dirname, "data/rod-pump-engine-sample");
 
 export const loadSampleFiles = (): Record<string, string> => {
   const files: Record<string, string> = {};

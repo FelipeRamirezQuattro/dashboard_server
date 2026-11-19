@@ -103,7 +103,7 @@ test("needsReembedding matrix", () => {
   assert(needsReembedding({ embeddingModel: "m", embeddingVersion: "1" }, prov), "no vector, no embeddedAt");
 });
 
-const dir = path.resolve(__dirname, "../../../../docs/rod-pump-failure-sample-data");
+const dir = path.resolve(__dirname, "data/rod-pump-engine-sample");
 const files: Record<string, string> = {};
 for (const n of ["cases", "components", "wear", "solids", "actions", "evidence"]) {
   files[`${n}.csv`] = fs.readFileSync(path.join(dir, `${n}.csv`), "utf8");

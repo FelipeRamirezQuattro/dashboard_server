@@ -316,7 +316,7 @@ for (const t of ["3.5", "1,210", "2024-03-15", "03/15/2024", "3:15", "210–290"
 }
 
 // 3. identifiers / words copied verbatim from the CITED evidence are not read as magnitude suffixes
-const sampleDir = path.resolve(__dirname, "../../../../docs/rod-pump-failure-sample-data");
+const sampleDir = path.resolve(__dirname, "data/rod-pump-engine-sample");
 const sampleFiles: Record<string, string> = {};
 for (const n of ["cases", "components", "wear", "solids", "actions", "evidence"]) {
   sampleFiles[`${n}.csv`] = fs.readFileSync(path.join(sampleDir, `${n}.csv`), "utf8");

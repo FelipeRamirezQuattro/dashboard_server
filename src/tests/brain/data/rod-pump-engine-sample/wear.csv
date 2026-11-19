@@ -1,0 +1,9 @@
+case_id,location,position_ft,value,unit
+DEMO-001,plunger_in,0,6,mil
+DEMO-001,plunger_in,1,7,mil
+DEMO-001,barrel_in,0,5,mil
+DEMO-001,barrel_in,1,6,mil
+DEMO-002,plunger_in,0,4,mil
+DEMO-002,plunger_in,1,5,mil
+DEMO-002,barrel_in,0,2,mil
+DEMO-002,barrel_in,1,2,mil

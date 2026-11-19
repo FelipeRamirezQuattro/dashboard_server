@@ -1,0 +1,6 @@
+case_id,species,percent,appearance,method
+DEMO-002,hydrocarbon_paraffin,89.7,Brown waxy solid,FTIR
+DEMO-002,scale_caco3,3.5,,FTIR
+DEMO-002,scale_fes,3.8,,
+DEMO-002,iron_species,1.8,,
+DEMO-002,acid_insoluble_sand,1.2,,

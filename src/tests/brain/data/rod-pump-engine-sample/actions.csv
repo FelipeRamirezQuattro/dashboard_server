@@ -1,0 +1,3 @@
+action_id,case_id,action_type,description,applied_in_next_run,next_case_id,outcome_note
+ACT-001,DEMO-001,fit_change,Changed plunger fit to reduce slippage after wear,yes,DEMO-002,Next run lasted longer; recorded by field engineer
+ACT-002,DEMO-002,component_replacement,Replaced valve rod bushing and standing valve cage with new parts,unknown,,

@@ -13,7 +13,7 @@ const test = (name: string, run: () => void): void => {
   cases.push({ name, run });
 };
 
-const dir = path.resolve(__dirname, "../../../../docs/rod-pump-failure-sample-data");
+const dir = path.resolve(__dirname, "data/rod-pump-engine-sample");
 const names = ["cases", "components", "wear", "solids", "actions", "evidence"];
 const base: Record<string, string> = {};
 for (const n of names) base[`${n}.csv`] = fs.readFileSync(path.join(dir, `${n}.csv`), "utf8");
@@ -46,7 +46,7 @@ test("sample data commits with exactly three case_has_children warnings", () => 
 
 test("definition shape", () => {
   const d = rodPumpFailureDefinition;
-  assert(d.key === "rod_pump_failure" && d.version === "0.1", "key/version");
+  assert(d.key === "rod_pump_failure" && d.version === "0.2", "key/version");
   assert(d.tables.length === 6, "six tables");
   assert(d.tables.filter((t) => t.required).map((t) => t.name).join() === "cases", "only cases required");
   assert(d.card?.rootTable === "cases" && d.card.include.join() === "components,wear,solids,actions", "card");

@@ -4,6 +4,7 @@ import logger from "../../utils/logger";
 import { recordBrainAudit } from "../brainAudit.service";
 import type { BrainAuditAction } from "../brainAudit.service";
 import { buildGroundedPrompt, composeAnswer, parseModelOutput, validateStatements } from "./grounding";
+import { buildBestPumpStatements } from "./recommend";
 import { retrieveEvidence } from "./retrieval";
 import type { Citation, Evidence } from "./types";
 
@@ -116,6 +117,15 @@ export async function answerGroundedWith(ports: GroundedPorts, p: GroundedInput)
   }
   if (evidence.length < min || evidence.length === 0) {
     return finish(insufficient(evidence), evidence.length, "too_little_evidence");
+  }
+
+  // "Best pump in <formation>": deterministic, copied from stored rows (no model); same citation/number gate and format.
+  const ranked = buildBestPumpStatements(p.question, evidence);
+  if (ranked) {
+    const { kept } = validateStatements(ranked, evidence);
+    if (kept.length > 0) {
+      return finish(withStatus(composeAnswer({ kept, evidence })), evidence.length, "ranked");
+    }
   }
 
   const prompt = buildGroundedPrompt({ categoryName: p.category.name, question: p.question, evidence, guidance });

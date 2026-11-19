@@ -61,6 +61,11 @@ const cases: TableDef = {
     { name: "primary_failure_mechanism", type: "enum_list", values: FAILURE_MODES },
     { name: "max_stroke_in", type: "number", min: 0.000001 },
     { name: "valve_rod_size_in", type: "number", min: 0.000001 },
+    { name: "formation", type: "string", maxLength: 80 },
+    { name: "pump_bore_in", type: "number", min: 0.000001 },
+    { name: "barrel_material", type: "string", maxLength: 80 },
+    { name: "plunger_type", type: "string", maxLength: 80 },
+    { name: "plunger_fit", type: "string", maxLength: 40 },
     { name: "inspection_summary", type: "text" },
     { name: "remarks", type: "text" },
     { name: "client_label", type: "string", maxLength: 80 },
@@ -162,7 +167,7 @@ const evidence: TableDef = {
 
 export const rodPumpFailureDefinition: DatasetDefinition = {
   key: "rod_pump_failure",
-  version: "0.1",
+  version: "0.2",
   label: "Rod Pump Failure",
   tables: [cases, components, wear, solids, actions, evidence],
   card: { rootTable: "cases", include: ["components", "wear", "solids", "actions"] },

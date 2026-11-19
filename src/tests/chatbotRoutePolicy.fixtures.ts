@@ -39,6 +39,21 @@ const fixtures = [
     bypassN8n: false,
   },
   {
+    message: "What is the best pump used in Middle Spraberry?",
+    route: "rod_pump_failure",
+    bypassN8n: false,
+  },
+  {
+    message: "What is the best pump utilized in Middle Spraberry? Diameter, Barrel Material, Plunger type, Plunger fit, Max run life",
+    route: "rod_pump_failure",
+    bypassN8n: false,
+  },
+  {
+    message: "How many days did AS-1508 run?",
+    route: "rod_pump_failure",
+    bypassN8n: false,
+  },
+  {
     message: "show me pump tracker",
     route: "pump_tracker",
     bypassN8n: false,

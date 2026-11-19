@@ -83,6 +83,12 @@ const ROD_PUMP_FAILURE_RULES = [
     reason: "Rod pump wear/deposit evidence terms.",
   },
   {
+    name: "rod_pump_formation_best_pump",
+    pattern:
+      /\b(best|top|longest|highest)\b.*\bpumps?\b.*\b(formation|spraberry|wolfcamp|bone\s*spring|eagle\s*ford)\b|\b(formation|spraberry|wolfcamp|bone\s*spring|eagle\s*ford)\b.*\b(best|top|longest|highest)\b.*\bpumps?\b/,
+    reason: "Best pump by formation question.",
+  },
+  {
     name: "rod_pump_recommendation",
     pattern:
       /\brecommend\w*\b.*\b(pump|plunger|barrel|valve)\b|\b(pump|plunger|barrel|valve)\b.*\brecommend\w*\b/,
